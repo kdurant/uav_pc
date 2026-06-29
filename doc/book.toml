@@ -1,0 +1,7 @@
+[book]
+title = "uav_doc"
+authors = ["kdurant"]
+language = "en"
+
+[preprocessor.katex]
+after = ["links"]
