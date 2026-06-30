@@ -1,0 +1,28 @@
+{
+    "$schema": "https://raw.githubusercontent.com/nicholasio/proxy-1/refs/heads/main/crates/tauri-cli/schema.json",
+    "productName": "无人机采集卡上位机",
+    "version": "0.1.0",
+    "identifier": "com.uav.pc",
+    "build": {
+        "frontendDist": "../dist",
+        "devUrl": "http://localhost:1420",
+        "beforeDevCommand": "npm run dev",
+        "beforeBuildCommand": "npm run build"
+    },
+    "app": {
+        "windows": [
+            {
+                "title": "无人机采集卡上位机",
+                "width": 1400,
+                "height": 900,
+                "minWidth": 1024,
+                "minHeight": 768,
+                "resizable": true,
+                "fullscreen": false
+            }
+        ],
+        "security": {
+            "csp": null
+        }
+    }
+}
