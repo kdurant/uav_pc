@@ -28,6 +28,8 @@ export function useChart(options: ChartOptions) {
     let rafId = 0;
     // 是否有新数据需要渲染
     let dirty = false;
+    // 是否暂停刷新（冻结画面）
+    let paused = false;
 
     /** 添加一组数据点（每个通道一个值） */
     function pushData(values: number[]) {
@@ -36,7 +38,7 @@ export function useChart(options: ChartOptions) {
         }
         writeIdx = (writeIdx + 1) % maxPoints;
         if (count < maxPoints) count++;
-        dirty = true;
+        if (!paused) dirty = true;
     }
 
     /** 获取按时间顺序排列的指定通道数据（从旧到新） */
@@ -112,6 +114,18 @@ export function useChart(options: ChartOptions) {
         dirty = true;
     }
 
+    /** 暂停/恢复刷新。暂停时数据仍在写入，但画面冻结 */
+    function setPaused(value: boolean) {
+        paused = value;
+    }
+
+    function isPaused() { return paused; }
+
+    /** 手动触发一次渲染（暂停模式下使用） */
+    function forceRender() {
+        dirty = true;
+    }
+
     return {
         pushData,
         clear,
@@ -120,5 +134,7 @@ export function useChart(options: ChartOptions) {
         stop,
         markDirty,
         getChannelData,
+        setPaused,
+        forceRender,
     };
 }
