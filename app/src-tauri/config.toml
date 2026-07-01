@@ -2,3 +2,16 @@
 local_ip = "192.168.93.44"
 local_port = 12345
 remote_port = 6666
+
+[capture]
+preview_coe = 1000
+ref_channal = 1
+save_channal = 0xff
+wave_len = 6000
+first_pos = 100
+first_len = 200
+second_pos = 400
+second_len = 400
+sum_value = 0
+max_value = 0
+pin_threshold = 1000

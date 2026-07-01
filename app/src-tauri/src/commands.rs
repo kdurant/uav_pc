@@ -19,6 +19,7 @@ pub struct NetworkState {
     pub network: Option<Arc<UdpNetwork>>,
     pub connected_device: Option<SocketAddr>,
     pub seq_counter: u16,
+    pub preview_enabled: bool,
     /// 广播通道：后台监听器将所有收到的帧转发至此，供命令订阅
     pub frame_tx: broadcast::Sender<(Frame, SocketAddr)>,
 }
@@ -62,6 +63,7 @@ pub async fn discover_devices(app: AppHandle) -> Result<Vec<DiscoveredDevice>, S
 
         network.send_broadcast(&frame, config.basic.remote_port).await?;
         log::info!("Sent broadcast for device discovery");
+        // release lock before collecting responses
     }
 
     // 订阅广播通道（后台监听器转发所有收到的帧）
@@ -102,6 +104,52 @@ pub async fn discover_devices(app: AppHandle) -> Result<Vec<DiscoveredDevice>, S
 
     let _ = app.emit("devices-found", devices.clone());
     Ok(devices)
+}
+
+/// 启动/停止预览数据采集
+/// enable=true: 发送 0x0300(0x00000001) + 启动 TCP 监听
+/// enable=false: 发送 0x0300(0x00000000) + 停止 TCP 监听
+#[tauri::command]
+pub async fn start_preview(
+    app: AppHandle,
+    device_ip: String,
+    enable: bool,
+) -> Result<(), String> {
+    let config = app.state::<AppConfig>();
+    let network = get_or_init_network(&app).await?;
+    let target: SocketAddr = format!("{}:{}", device_ip, config.basic.remote_port)
+        .parse()
+        .map_err(|e| format!("Invalid device address: {}", e))?;
+
+    let seq = next_seq_inner(&app).await;
+
+    let enable_val: u32 = if enable { 1 } else { 0 };
+    let data = enable_val.to_be_bytes().to_vec();
+
+    let mut frame = Frame::new(0x0300, SourceAddr::PC as u16, DestAddr::PS as u16, data);
+    frame.seq = seq;
+
+    network.send_to(&target, &frame).await?;
+
+    // 更新 TCP 预览状态
+    {
+        let state = app.state::<Arc<Mutex<NetworkState>>>();
+        let mut guard = state.lock().await;
+        guard.preview_enabled = enable;
+    }
+
+    let _ = app.emit("preview-state-changed", enable);
+    log::info!("Preview {} for {}", if enable { "enabled" } else { "disabled" }, device_ip);
+    Ok(())
+}
+
+/// 内部获取帧序号
+async fn next_seq_inner(app: &AppHandle) -> u16 {
+    let state = app.state::<Arc<Mutex<NetworkState>>>();
+    let mut guard = state.lock().await;
+    let seq = guard.seq_counter;
+    guard.seq_counter = guard.seq_counter.wrapping_add(1);
+    seq
 }
 
 /// 查询系统状态

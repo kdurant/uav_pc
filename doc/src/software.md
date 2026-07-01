@@ -4,18 +4,31 @@
 
 - [通信协议格式](./protocol_format.md)
 - [具体通信指令](./pc-ps.md)
+- [存储数据格式](./storge_data_format.md)
 
 
 # 配置文件
 - 使用config.toml作为配置文件
 ## 配置文件选项
-
 ```toml
 [basic]
 local_ip = "192.168.93.44"
 local_port = 12345
 
 remote_port = 6666
+
+[capture]
+preview_coe = 1000
+ref_channal = 1
+save_channal = 0xff
+wave_len = 6000
+first_pos = 100
+first_len = 200
+second_pos = 400
+second_len = 400
+sum_value = 0
+max_value = 0
+pin_threshold = 1000
 ```
 
 
@@ -41,3 +54,11 @@ remote_port = 6666
 ## 解析，显示设备状态
 1. 上位发送0x0102命令
 2. 采集卡会响应0x0102命令, 参考./sys_status.md，解析并显示系统状态
+
+
+## 数据采集，预览
+1. 上位机上使用按键设置capture参数
+2. 按键发送0x0300命令（0x00， 0x00, 0x00, 0x01)，通知设备上传[波形数据](./storge_data_format.md)
+3. 上位机解析并显示
+4. 可以通过checkbox独立选择是否显示那个通道的数据
+5. 可以使用鼠标滚轮缩放预览数据

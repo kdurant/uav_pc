@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed } from "vue";
 import { useDeviceDiscovery } from "../composables/useDeviceDiscovery";
 import { useSystemStatus } from "../composables/useSystemStatus";
+import { usePreviewData } from "../composables/usePreviewData";
 import DeviceSelector from "./DeviceSelector.vue";
 import StatusPanel from "./StatusPanel.vue";
 import ChartView from "./ChartView.vue";
@@ -17,35 +18,20 @@ const connectionState = ref<ConnectionState>(ConnectionState.Disconnected);
 const showDeviceSelector = ref(false);
 const isConnecting = ref(false);
 
+// 通道可见性
+const channelVisible = ref([true, true, true, true]);
+
 // Chart ref
 const chartRef = ref<InstanceType<typeof ChartView> | null>(null);
 
-// Demo data generator
-let demoInterval: ReturnType<typeof setInterval> | null = null;
-
-function startDemoData() {
-  if (demoInterval) return;
-  let t = 0;
-  demoInterval = setInterval(() => {
-    t += 0.1;
-    const amp = 2000;
-    const offset = 2048;
-    const noise = () => (Math.random() - 0.5) * 200;
-    chartRef.value?.pushData([
-      Math.sin(t) * amp + offset + noise(),
-      Math.sin(t * 1.5 + 1) * amp * 0.7 + offset * 0.8 + noise(),
-      Math.sin(t * 0.7 + 2) * amp * 0.5 + offset * 1.2 + noise(),
-      Math.cos(t * 1.2 + 0.5) * amp * 0.6 + offset * 0.9 + noise(),
-    ]);
-  }, 10);
-}
-
-function stopDemoData() {
-  if (demoInterval) {
-    clearInterval(demoInterval);
-    demoInterval = null;
+// Preview data → ChartView
+function pushPreviewData(batches: number[][]) {
+  for (const batch of batches) {
+    chartRef.value?.pushData(batch);
   }
 }
+
+const previewOutput = usePreviewData(pushPreviewData);
 
 const statusLabel = computed(() => {
   switch (connectionState.value) {
@@ -98,6 +84,7 @@ async function handleConnect(device: (typeof devices.value)[0]) {
     });
     connectionState.value = ConnectionState.Connected;
     startStatus();
+    previewOutput.start();
   } catch (err) {
     console.error("Connection failed:", err);
     connectionState.value = ConnectionState.Disconnected;
@@ -127,6 +114,7 @@ async function handleToggleStatus(enable: boolean) {
 
 async function handleDisconnect() {
   stopStatus();
+  previewOutput.stop();
   if (selectedDevice.value) {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -144,11 +132,6 @@ async function handleDisconnect() {
 
 // 启动时自动搜索
 handleSearch();
-
-// 组件挂载后启动演示数据
-onMounted(() => {
-  startDemoData();
-});
 </script>
 
 <template>
@@ -190,9 +173,11 @@ onMounted(() => {
           <ControlPanel
             :connected="connectionState === ConnectionState.Connected"
             :device-ip="selectedDevice?.ip"
+            :channel-visible="channelVisible"
             @search="handleSearch"
             @disconnect="handleDisconnect"
             @toggle-status="handleToggleStatus"
+            @update:channel-visible="channelVisible = $event"
           />
         </div>
       </aside>
@@ -201,7 +186,7 @@ onMounted(() => {
       <main class="panel panel-center">
         <div class="panel-header">数据预览</div>
         <div class="panel-body chart-body">
-          <ChartView ref="chartRef" :channel-count="4" :max-points="4000" />
+          <ChartView ref="chartRef" :channel-count="4" :max-points="4000" :channel-visible="channelVisible" />
         </div>
       </main>
 

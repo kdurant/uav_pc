@@ -8,8 +8,24 @@ pub struct BasicConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptureConfig {
+    pub preview_coe: u32,
+    pub ref_channal: u32,
+    pub save_channal: u32,
+    pub wave_len: u32,
+    pub first_pos: u32,
+    pub first_len: u32,
+    pub second_pos: u32,
+    pub second_len: u32,
+    pub sum_value: u32,
+    pub max_value: u32,
+    pub pin_threshold: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub basic: BasicConfig,
+    pub capture: CaptureConfig,
 }
 
 impl AppConfig {

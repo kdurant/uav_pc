@@ -7,6 +7,7 @@ use tokio::sync::{broadcast, Mutex};
 mod commands;
 mod config;
 mod network;
+mod preview;
 mod protocol;
 mod status;
 
@@ -37,23 +38,55 @@ async fn background_udp_listener(
     loop {
         match network.recv_from().await {
             Ok((frame, addr)) => {
-                // 0x0102 系统状态直接解析并推送前端
+                // 检查是否有已连接的设备，如果有则只处理来自该设备的帧
+                let connected = {
+                    let state = app.state::<Arc<Mutex<NetworkState>>>();
+                    let guard = state.lock().await;
+                    guard.connected_device.clone()
+                };
+
+                let from_connected = match &connected {
+                    Some(conn) => addr.ip() == conn.ip(),
+                    None => false,
+                };
+
+                // 0x0100 设备发现响应始终允许（发现阶段可能未连接）
+                // 0x0102 和 0x0300 只处理来自已连接设备的数据
                 if frame.cmd == 0x0102 {
-                    match status::SystemStatus::parse(&frame.data) {
-                        Ok(sys_status) => {
-                            log::debug!("Received system status from {}", addr);
-                            let _ = app.emit("sys-status-update", sys_status);
+                    if from_connected {
+                        match status::SystemStatus::parse(&frame.data) {
+                            Ok(sys_status) => {
+                                log::debug!("Received system status from {}", addr);
+                                let _ = app.emit("sys-status-update", sys_status);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to parse system status: {}", e);
+                            }
                         }
-                        Err(e) => {
-                            log::warn!("Failed to parse system status: {}", e);
+                    } else {
+                        log::trace!("Ignored 0x0102 from non-connected device {}", addr);
+                    }
+                } else if frame.cmd == 0x0300 {
+                    if from_connected {
+                        match preview::PreviewFrame::parse(&frame.data) {
+                            Ok(preview_frame) => {
+                                let _ = app.emit("preview-data", preview_frame);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to parse preview data: {}", e);
+                            }
                         }
+                    } else {
+                        log::trace!("Ignored 0x0300 from non-connected device {}", addr);
                     }
                 } else {
                     log::trace!("Received cmd 0x{:04x} from {}", frame.cmd, addr);
                 }
 
-                // 所有帧都转发到 broadcast channel，供命令函数订阅
-                let _ = frame_tx.send((frame, addr));
+                // 0x0100 和 0x0102 转发到 broadcast channel（0x0100 供 discover 使用；0x0102 仅已连接的）
+                if frame.cmd == 0x0100 || (frame.cmd == 0x0102 && from_connected) || (frame.cmd != 0x0100 && frame.cmd != 0x0102 && frame.cmd != 0x0300) {
+                    let _ = frame_tx.send((frame, addr));
+                }
             }
             Err(e) => {
                 log::warn!("UDP receive error: {}", e);
@@ -78,6 +111,7 @@ pub fn run() {
             network: None,
             connected_device: None,
             seq_counter: 0,
+            preview_enabled: false,
             frame_tx: frame_tx.clone(),
         })))
         .setup(move |app| {
@@ -95,6 +129,7 @@ pub fn run() {
             commands::discover_devices,
             commands::query_sys_status,
             commands::send_command,
+            commands::start_preview,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -65,6 +65,35 @@ export interface SystemStatus {
     preview_rd_cnt: number;
 }
 
+/** 单个通道的波形数据 */
+export interface ChannelData {
+    channel_id: number;
+    seg0_start: number;
+    seg0_len: number;
+    seg0_data: number[];
+    seg1_start: number;
+    seg1_len: number;
+    seg1_data: number[];
+}
+
+/** TCP 预览数据帧 */
+export interface PreviewFrame {
+    gps_week: number;
+    gps_second: number;
+    sub_time: number;
+    azimuth: number;
+    pitch: number;
+    roll: number;
+    latitude: number;
+    longitude: number;
+    altitude: number;
+    encoder_bits: number;
+    encoder_value: number;
+    wave_channels: number;
+    wave_length: number;
+    channels: ChannelData[];
+}
+
 /** 应用配置 */
 export interface AppConfig {
     basic: {
