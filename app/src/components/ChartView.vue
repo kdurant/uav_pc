@@ -47,22 +47,137 @@ let lastYMin = NaN;
 let lastYMax = NaN;
 let lastWidth = 0;
 
-const gridColor = "rgba(142, 190, 120, 0.85)";
-const textColor = "#a0a0b0";
+const gridColor = "rgba(70, 80, 100, 0.55)";
+const textColor = "#7c8290";
+const axisColor = "rgba(90, 100, 120, 0.7)";
 const fontSize = 10;
 
-/** 应用手动范围 */
-function applyManualRangeY() {
-  useManualRangeY.value = true;
+// 鼠标悬停坐标（canvas 像素坐标，-1 表示不在图表区域）
+let hoverX = -1;
+let hoverY = -1;
+// 最近一次 render 的绘图区域参数（供 overlay 使用）
+let lastRenderState = {
+  margin: { top: 8, right: 12, bottom: 20, left: 50 },
+  plotW: 0, plotH: 0,
+  startIdx: 0, visibleLen: 0,
+  yMin: 0, yMax: 0,
+  buffers: [] as Float64Array[],
+};
+
+// 框选缩放状态
+let isDragging = false;
+let dragStartX = -1;
+let dragStartY = -1;
+let dragCurrentX = -1;
+let dragCurrentY = -1;
+
+function onMouseDown(e: MouseEvent) {
+  if (e.button !== 0) return; // 仅左键
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const { margin, plotW, plotH } = lastRenderState;
+  // 检查是否在绘图区域内
+  const plotRight = margin.left + plotW;
+  const plotBottom = margin.top + plotH;
+  if (x >= margin.left && x <= plotRight && y >= margin.top && y <= plotBottom) {
+    isDragging = true;
+    dragStartX = x;
+    dragStartY = y;
+    dragCurrentX = x;
+    dragCurrentY = y;
+  }
+}
+
+function onMouseMove(e: MouseEvent) {
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  hoverX = e.clientX - rect.left;
+  hoverY = e.clientY - rect.top;
+  if (isDragging) {
+    dragCurrentX = hoverX;
+    dragCurrentY = hoverY;
+  }
+  chart.markOverlayDirty();
+}
+
+function onMouseUp(e: MouseEvent) {
+  if (!isDragging) return;
+  isDragging = false;
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const x0 = dragStartX;
+  const y0 = dragStartY;
+  const x1 = dragCurrentX;
+  const y1 = dragCurrentY;
+
+  // 最小框选距离
+  const minBox = 8;
+  if (Math.abs(x1 - x0) < minBox && Math.abs(y1 - y0) < minBox) {
+    dragStartX = -1;
+    chart.markDirty();
+    return;
+  }
+
+  const { margin, plotW, plotH, startIdx, visibleLen, yMin, yMax } = lastRenderState;
+
+  // 转换像素坐标到数据坐标
+  const toDataX = (px: number) => startIdx + ((px - margin.left) / plotW) * (visibleLen - 1);
+  const toDataY = (py: number) => yMax - ((py - margin.top) / plotH) * (yMax - yMin);
+
+  const boxLeft = Math.min(x0, x1);
+  const boxRight = Math.max(x0, x1);
+  const boxTop = Math.min(y0, y1);
+  const boxBottom = Math.max(y0, y1);
+
+  // 应用框选的 X 范围
+  let newXStart = toDataX(boxLeft);
+  let newXEnd = toDataX(boxRight);
+  newXStart = Math.max(0, Math.round(newXStart));
+  newXEnd = Math.round(newXEnd);
+  if (newXEnd <= newXStart) newXEnd = newXStart + 1;
+
+  // 应用框选的 Y 范围（仅当框选高度足够大时才调整 Y 轴）
+  const boxH = Math.abs(boxBottom - boxTop);
+  if (boxH > 20) {
+    const newYMax = toDataY(boxTop);
+    const newYMin = toDataY(boxBottom);
+    yMinManual.value = Math.min(newYMin, newYMax);
+    yMaxManual.value = Math.max(newYMin, newYMax);
+    useManualRangeY.value = true;
+  }
+
+  xStartManual.value = newXStart;
+  xEndManual.value = newXEnd;
+  useManualRangeX.value = true;
+
+  dragStartX = -1;
   chart.markDirty();
 }
-function applyManualRangeX() {
+
+function onMouseLeave() {
+  hoverX = -1;
+  hoverY = -1;
+  if (isDragging) {
+    isDragging = false;
+    dragStartX = -1;
+  }
+  chart.markOverlayDirty();
+}
+
+/** 应用手动范围 */
+function applyRange() {
   useManualRangeX.value = true;
+  useManualRangeY.value = true;
   chart.markDirty();
 }
 function resetAutoRange() {
   useManualRangeY.value = false;
-  useManualRangeXY.value = false;
   useManualRangeX.value = false;
   chart.markDirty();
 }
@@ -90,7 +205,8 @@ function onWheel(e: WheelEvent) {
 function resetZoom() {
   zoomFactor.value = 1.0;
   visiblePoints.value = props.maxPoints;
-  useManualRange.value = false;
+  useManualRangeY.value = false;
+  useManualRangeX.value = false;
   chart.markDirty();
 }
 
@@ -154,12 +270,12 @@ function render(buffers: Float64Array[], width: number, height: number) {
 
   // 清除
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#1a1a2e";
+  ctx.fillStyle = "#0f1117";
   ctx.fillRect(0, 0, width, height);
 
-  // 绘图区域边框
-  ctx.strokeStyle = gridColor;
-  ctx.lineWidth = 1;
+  // 绘图区域边框（轴线用更亮的颜色）
+  ctx.strokeStyle = axisColor;
+  ctx.lineWidth = 1.2;
   ctx.strokeRect(margin.left, margin.top, plotW, plotH);
 
   if (showGrid.value) {
@@ -261,6 +377,118 @@ function render(buffers: Float64Array[], width: number, height: number) {
     ctx.font = `${fontSize - 1}px sans-serif`;
     ctx.fillText(props.channelVisible[ch] ? `CH${ch}` : `CH${ch}(隐藏)`, x + 13, y + 3);
   }
+
+  // 保存渲染参数供 overlay 使用
+  lastRenderState = { margin, plotW, plotH, startIdx, visibleLen, yMin, yMax, buffers };
+
+  // ---- 鼠标悬停十字光标 + 坐标提示 ----
+  const dpr = window.devicePixelRatio || 1;
+  const mx = hoverX * dpr;
+  const my = hoverY * dpr;
+
+  // 框选矩形（在光标之前绘制，避免遮挡）
+  if (isDragging && dragStartX >= 0 && dragCurrentX >= 0) {
+    const sx = Math.min(dragStartX, dragCurrentX) * dpr;
+    const sy = Math.min(dragStartY, dragCurrentY) * dpr;
+    const sw = Math.abs(dragCurrentX - dragStartX) * dpr;
+    const sh = Math.abs(dragCurrentY - dragStartY) * dpr;
+
+    ctx.fillStyle = "rgba(59, 158, 255, 0.08)";
+    ctx.fillRect(sx, sy, sw, sh);
+    ctx.strokeStyle = "rgba(59, 158, 255, 0.5)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 2]);
+    ctx.strokeRect(sx, sy, sw, sh);
+    ctx.setLineDash([]);
+  }
+
+  // 判断鼠标是否在绘图区域内
+  if (
+    mx >= margin.left && mx <= margin.left + plotW &&
+    my >= margin.top  && my <= margin.top + plotH
+  ) {
+    // 根据鼠标 X 位置反推最近的数据索引
+    const fraction = (mx - margin.left) / plotW;
+    const nearIdx = Math.round(startIdx + fraction * (visibleLen - 1));
+
+    // 十字光标
+    ctx.save();
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = "rgba(200, 205, 220, 0.25)";
+    ctx.lineWidth = 0.8;
+    // 竖线
+    ctx.beginPath();
+    ctx.moveTo(mx, margin.top);
+    ctx.lineTo(mx, margin.top + plotH);
+    ctx.stroke();
+    // 横线
+    ctx.beginPath();
+    ctx.moveTo(margin.left, my);
+    ctx.lineTo(margin.left + plotW, my);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // 在十字交叉点处标记最近的数据点（每个可见通道一个圆点）
+    const tipLines: string[] = [];
+    tipLines.push(`X = ${nearIdx}`);
+
+    for (let ch = 0; ch < Math.min(buffers.length, 4); ch++) {
+      if (!props.channelVisible[ch]) continue;
+      const buf = buffers[ch];
+      if (nearIdx < 0 || nearIdx >= buf.length) continue;
+
+      const val = buf[nearIdx];
+      const px = margin.left + ((nearIdx - startIdx) / Math.max(1, visibleLen - 1)) * plotW;
+      const py = margin.top + plotH - ((val - yMin) / (yMax - yMin || 1)) * plotH;
+
+      // 实心圆点
+      const dotR = 3.5;
+      const color = props.lineColors[ch] || "#fff";
+      ctx.beginPath();
+      ctx.arc(px, py, dotR, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = "#0f1117";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      tipLines.push(`CH${ch} = ${val.toFixed(1)}`);
+    }
+
+    // 绘制坐标提示框
+    if (tipLines.length > 0) {
+      ctx.font = `${fontSize + 1}px monospace`;
+      const padding = 5;
+      const lineH = fontSize + 3;
+      const boxW = Math.max(...tipLines.map(l => ctx.measureText(l).width)) + padding * 2;
+      const boxH = tipLines.length * lineH + padding * 2;
+
+      // 计算位置（避免超出图表边界）
+      let bx = mx + 10;
+      let by = my - boxH / 2;
+      if (bx + boxW > margin.left + plotW) bx = mx - boxW - 10;
+      if (by < margin.top) by = margin.top;
+      if (by + boxH > margin.top + plotH) by = margin.top + plotH - boxH;
+
+      // 背景
+      ctx.fillStyle = "rgba(15, 17, 23, 0.88)";
+      ctx.strokeStyle = "rgba(120, 130, 150, 0.5)";
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, boxW, boxH, 3);
+      ctx.fill();
+      ctx.stroke();
+
+      // 文字
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      for (let i = 0; i < tipLines.length; i++) {
+        ctx.fillStyle = i === 0 ? textColor : (props.lineColors[i - 1] || "#fff");
+        ctx.fillText(tipLines[i], bx + padding, by + padding + i * lineH);
+      }
+    }
+  }
 }
 
 function resize() {
@@ -321,18 +549,28 @@ onMounted(() => {
     container.addEventListener("wheel", onWheel, { passive: false });
     container.addEventListener("dblclick", resetZoom);
   }
+  if (canvas) {
+    canvas.addEventListener("mousemove", onMouseMove);
+    canvas.addEventListener("mousedown", onMouseDown);
+    canvas.addEventListener("mouseup", onMouseUp);
+    canvas.addEventListener("mouseleave", onMouseLeave);
+  }
 });
 onUnmounted(() => {
   resizeObserver?.disconnect();
   containerRef.value?.removeEventListener("wheel", onWheel);
   containerRef.value?.removeEventListener("dblclick", resetZoom);
+  canvasRef.value?.removeEventListener("mousemove", onMouseMove);
+  canvasRef.value?.removeEventListener("mousedown", onMouseDown);
+  canvasRef.value?.removeEventListener("mouseup", onMouseUp);
+  canvasRef.value?.removeEventListener("mouseleave", onMouseLeave);
 });
 </script>
 
 <template>
   <div ref="containerRef" class="chart-container">
     <canvas ref="canvasRef"></canvas>
-    <div class="zoom-hint">滚轮X轴缩放 · Ctrl+滚轮Y轴缩放 · 双击重置</div>
+    <div class="zoom-hint">滚轮X轴缩放 · Ctrl+滚轮Y轴缩放 · 框选放大 · 双击重置</div>
     <div class="channel-bar">
       <!-- 通道可见性 -->
       <label v-for="ch in props.channelCount" :key="ch" class="ch-cb"
@@ -341,19 +579,19 @@ onUnmounted(() => {
         <span>CH{{ ch-1 }}</span>
       </label>
       <span class="sep"></span>
-      <!-- 坐标范围 Y -->
-      <span class="bar-label">Y:</span>
-      <input type="number" v-model.number="yMinManual" class="range-inp" title="Y 最小值" />
-      <span class="bar-label">~</span>
-      <input type="number" v-model.number="yMaxManual" class="range-inp" title="Y 最大值" />
-      <button class="bar-btn" @click="applyManualRangeY">设定</button>
-      <span class="sep"></span>
       <!-- 坐标范围 X -->
       <span class="bar-label">X:</span>
       <input type="number" v-model.number="xStartManual" class="range-inp" title="X 起始索引" />
       <span class="bar-label">~</span>
       <input type="number" v-model.number="xEndManual" class="range-inp" title="X 结束索引" />
-      <button class="bar-btn" @click="applyManualRangeX">设定</button>
+      <span class="sep"></span>
+      <!-- 坐标范围 Y -->
+      <span class="bar-label">Y:</span>
+      <input type="number" v-model.number="yMinManual" class="range-inp" title="Y 最小值" />
+      <span class="bar-label">~</span>
+      <input type="number" v-model.number="yMaxManual" class="range-inp" title="Y 最大值" />
+      <span class="sep"></span>
+      <button class="bar-btn" @click="applyRange">设定</button>
       <button class="bar-btn" @click="resetAutoRange">自动</button>
       <span class="sep"></span>
       <!-- 显示选项 -->
@@ -387,6 +625,7 @@ canvas {
   flex: 1;
   display: block;
   min-height: 0;
+  cursor: crosshair;
 }
 
 .zoom-hint {
@@ -403,8 +642,8 @@ canvas {
 .channel-bar {
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 4px 12px;
+  gap: 5px;
+  padding: 5px 14px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
@@ -412,33 +651,33 @@ canvas {
 }
 .sep {
   width: 1px;
-  height: 14px;
+  height: 18px;
   background: var(--border-color);
-  margin: 0 4px;
+  margin: 0 6px;
 }
 .bar-label {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 .range-inp {
-  width: 56px;
-  font-size: 10px;
-  padding: 1px 4px;
-  height: 18px;
+  width: 68px;
+  font-size: 12px;
+  padding: 2px 6px;
+  height: 22px;
 }
 .bar-btn {
-  font-size: 10px;
-  padding: 1px 6px;
-  height: 18px;
+  font-size: 12px;
+  padding: 3px 10px;
+  height: 22px;
   line-height: 1;
 }
 .ch-cb {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   cursor: pointer;
-  font-size: 10px;
-  padding: 1px 6px;
+  font-size: 12px;
+  padding: 2px 8px;
   border-radius: 3px;
   border: 1px solid transparent;
   transition: border-color 0.15s;
@@ -447,8 +686,8 @@ canvas {
   border-color: var(--ch-color, var(--accent-dim));
 }
 .ch-cb input[type="checkbox"] {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   cursor: pointer;
 }
 .ch-cb span {

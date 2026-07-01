@@ -148,14 +148,7 @@ handleSearch();
       </div>
       <div class="toolbar-right">
         <button
-          v-if="connectionState === ConnectionState.Connected"
-          class="accent"
-          @click="handleDisconnect"
-        >
-          断开
-        </button>
-        <button
-          v-else
+          v-if="connectionState !== ConnectionState.Connected"
           :disabled="isSearching"
           @click="handleSearch"
         >
@@ -176,7 +169,6 @@ handleSearch();
             @search="handleSearch"
             @disconnect="handleDisconnect"
             @toggle-status="handleToggleStatus"
-          />
           />
         </div>
       </aside>
@@ -243,13 +235,11 @@ handleSearch();
   justify-content: flex-end;
 }
 .app-title {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--accent);
   white-space: nowrap;
-}
-.connection-status {
-  font-size: 13px;
+  letter-spacing: 0.03em;
 }
 
 /* Main content area */
@@ -283,14 +273,14 @@ handleSearch();
   flex-shrink: 0;
 }
 .panel-header {
-  padding: 10px 14px;
-  font-size: 13px;
-  font-weight: 600;
+  padding: 9px 14px;
+  font-size: 11px;
+  font-weight: 700;
   color: var(--text-secondary);
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.2px;
   flex-shrink: 0;
 }
 .panel-body {

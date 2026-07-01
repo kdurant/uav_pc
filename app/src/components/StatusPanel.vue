@@ -109,11 +109,11 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <h4>版本信息</h4>
       <div class="status-row">
         <span class="label">PS版本</span>
-        <span class="value mono">{{ status.ps_version || "-" }}</span>
+        <span class="value mono">{{ props.status.ps_version || "-" }}</span>
       </div>
       <div class="status-row">
         <span class="label">PL版本</span>
-        <span class="value mono">{{ status.pl_version || "-" }}</span>
+        <span class="value mono">{{ props.status.pl_version || "-" }}</span>
       </div>
     </section>
 
@@ -122,27 +122,27 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <h4>环境参数</h4>
       <div class="status-row">
         <span class="label">板载温度</span>
-        <span class="value">{{ fmt(status.i2c_temp, 1) }} °C</span>
+        <span class="value">{{ fmt(props.status.i2c_temp, 1) }} °C</span>
       </div>
       <div class="status-row">
         <span class="label">电机转速</span>
-        <span class="value">{{ fmtMotorSpeed(status.motor_speed) }}</span>
+        <span class="value">{{ fmtMotorSpeed(props.status.motor_speed) }}</span>
       </div>
       <div class="status-row">
         <span class="label">触发周期</span>
-        <span class="value">{{ fmt(status.trg_cycle, 1) }} Hz</span>
+        <span class="value">{{ fmt(props.status.trg_cycle, 1) }} Hz</span>
       </div>
       <div class="status-row">
         <span class="label">PPS周期</span>
-        <span class="value">{{ fmt(status.pps_cycle, 1) }} Hz</span>
+        <span class="value">{{ fmt(props.status.pps_cycle, 1) }} Hz</span>
       </div>
       <div class="status-row">
         <span class="label">触发模式</span>
-        <span class="value">{{ trgModeLabel(status.trg_mode) }}</span>
+        <span class="value">{{ trgModeLabel(props.status.trg_mode) }}</span>
       </div>
       <div class="status-row">
         <span class="label">激光频率</span>
-        <span class="value">{{ status.laser_freq || 0 }} Hz</span>
+        <span class="value">{{ props.status.laser_freq || 0 }} Hz</span>
       </div>
     </section>
 
@@ -169,19 +169,19 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       </div>
       <div class="status-row">
         <span class="label">抽样率</span>
-        <span class="value">{{ status.preview_coe || 0 }}</span>
+        <span class="value">{{ props.status.preview_coe || 0 }}</span>
       </div>
       <div class="status-row">
         <span class="label">采集长度</span>
-        <span class="value">{{ status.wave_len || 0 }}</span>
+        <span class="value">{{ props.status.wave_len || 0 }}</span>
       </div>
       <div class="status-row">
         <span class="label">第一段</span>
-        <span class="value">pos={{ status.first_pos }} len={{ status.first_len }}</span>
+        <span class="value">pos={{ props.status.first_pos }} len={{ props.status.first_len }}</span>
       </div>
       <div class="status-row">
         <span class="label">第二段</span>
-        <span class="value">pos={{ status.second_pos }} len={{ status.second_len }}</span>
+        <span class="value">pos={{ props.status.second_pos }} len={{ props.status.second_len }}</span>
       </div>
     </section>
 
@@ -210,11 +210,11 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       </div>
       <div class="status-row">
         <span class="label">写耗时(8ns)</span>
-        <span class="value">{{ status.max_write_time }}</span>
+        <span class="value">{{ props.status.max_write_time }}</span>
       </div>
       <div class="status-row">
         <span class="label">预览写/读</span>
-        <span class="value">{{ status.preview_wr_cnt }} / {{ status.preview_rd_cnt }}</span>
+        <span class="value">{{ props.status.preview_wr_cnt }} / {{ props.status.preview_rd_cnt }}</span>
       </div>
     </section>
 
@@ -231,15 +231,15 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <h4>GPS 数据</h4>
       <div class="status-row">
         <span class="label">经度</span>
-        <span class="value">{{ status.gps_longitude.toFixed(6) }}°</span>
+        <span class="value">{{ props.status.gps_longitude.toFixed(6) }}°</span>
       </div>
       <div class="status-row">
         <span class="label">纬度</span>
-        <span class="value">{{ status.gps_latitude.toFixed(6) }}°</span>
+        <span class="value">{{ props.status.gps_latitude.toFixed(6) }}°</span>
       </div>
       <div class="status-row">
         <span class="label">高度</span>
-        <span class="value">{{ status.gps_altitude.toFixed(2) }} m</span>
+        <span class="value">{{ props.status.gps_altitude.toFixed(2) }} m</span>
       </div>
       <div class="status-row">
         <span class="label">方位角</span>
@@ -266,15 +266,15 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 }
 
 .status-group {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .status-group h4 {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--accent);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.2px;
   margin-bottom: 6px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border-color);
@@ -291,12 +291,14 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 .label {
   color: var(--text-secondary);
   flex-shrink: 0;
+  font-size: 11px;
 }
 
 .value {
   color: var(--text-primary);
   text-align: right;
   word-break: break-all;
+  font-variant-numeric: tabular-nums;
 }
 
 .mono {
@@ -320,23 +322,24 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 }
 .adc-bar-wrap {
   flex: 1;
-  height: 8px;
+  height: 6px;
   background: var(--bg-primary);
-  border-radius: 4px;
+  border-radius: 3px;
   overflow: hidden;
 }
 .adc-bar {
   height: 100%;
   background: linear-gradient(90deg, var(--accent-dim), var(--accent));
-  border-radius: 4px;
-  transition: width 0.3s;
+  border-radius: 3px;
+  transition: width 0.2s ease-out;
 }
 .adc-val {
   color: var(--text-primary);
   font-size: 10px;
-  width: 40px;
+  width: 44px;
   text-align: right;
-  font-family: monospace;
+  font-family: "Cascadia Code", "Fira Code", monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Status indicators */
@@ -346,13 +349,14 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 }
 .status-off {
   color: var(--text-secondary);
+  opacity: 0.7;
 }
 
 /* FIFO warnings */
 .fifo-warn {
   color: var(--error);
   font-size: 11px;
-  padding: 1px 0;
+  padding: 2px 0;
 }
 
 /* Empty state */
@@ -362,5 +366,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
   justify-content: center;
   height: 200px;
   color: var(--text-secondary);
+  font-size: 12px;
+  opacity: 0.6;
 }
 </style>

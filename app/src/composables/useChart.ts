@@ -30,6 +30,8 @@ export function useChart(options: ChartOptions) {
     let dirty = false;
     // 是否暂停刷新（冻结画面）
     let paused = false;
+    // 暂停时的冻结数据快照
+    let frozenData: Float64Array[] | null = null;
 
     /** 添加一组数据点（每个通道一个值） */
     function pushData(values: number[]) {
@@ -81,17 +83,30 @@ export function useChart(options: ChartOptions) {
         function frame() {
             if (dirty) {
                 dirty = false;
+                overlayDirty = false;
 
-                // 收集所有通道数据
+                // 收集所有通道数据（暂停时使用冻结快照）
                 const allData: Float64Array[] = [];
                 for (let ch = 0; ch < channels; ch++) {
-                    allData.push(getChannelData(ch));
+                    allData.push(frozenData ? frozenData[ch] : getChannelData(ch));
                 }
 
-                // 在离屏 canvas 上渲染
+                // 在离屏 canvas 上渲染（包括数据和 overlay）
                 onRender(allData, offscreen.width, offscreen.height);
 
                 // 复制到主 canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(offscreen, 0, 0);
+            } else if (overlayDirty) {
+                overlayDirty = false;
+
+                // 暂停时仅刷新 overlay（数据不变，重新绘制光标/框选）
+                const allData: Float64Array[] = [];
+                for (let ch = 0; ch < channels; ch++) {
+                    allData.push(frozenData ? frozenData[ch] : getChannelData(ch));
+                }
+                onRender(allData, offscreen.width, offscreen.height);
+
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.drawImage(offscreen, 0, 0);
             }
@@ -114,9 +129,25 @@ export function useChart(options: ChartOptions) {
         dirty = true;
     }
 
-    /** 暂停/恢复刷新。暂停时数据仍在写入，但画面冻结 */
+    /** 仅标记 overlay 脏（鼠标移动等，暂停时不触发数据重绘） */
+    function markOverlayDirty() {
+        overlayDirty = true;
+    }
+    let overlayDirty = false;
+
+    /** 暂停/恢复刷新。暂停时冻结数据快照，画面冻结 */
     function setPaused(value: boolean) {
         paused = value;
+        if (paused) {
+            // 冻结当前数据快照
+            frozenData = [];
+            for (let ch = 0; ch < channels; ch++) {
+                frozenData.push(new Float64Array(getChannelData(ch)));
+            }
+        } else {
+            frozenData = null;
+            dirty = true;
+        }
     }
 
     function isPaused() { return paused; }
@@ -133,6 +164,7 @@ export function useChart(options: ChartOptions) {
         renderLoop,
         stop,
         markDirty,
+        markOverlayDirty,
         getChannelData,
         setPaused,
         forceRender,

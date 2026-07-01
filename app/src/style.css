@@ -7,18 +7,21 @@
 }
 
 :root {
-    --bg-primary: #1a1a2e;
-    --bg-secondary: #16213e;
-    --bg-tertiary: #0f3460;
-    --text-primary: #e0e0e0;
-    --text-secondary: #a0a0b0;
-    --accent: #00d4ff;
-    --accent-dim: #0088aa;
-    --border-color: #2a2a4a;
-    --success: #00c853;
-    --warning: #ff9800;
-    --error: #f44336;
-    --panel-radius: 8px;
+    --bg-primary: #0f1117;
+    --bg-secondary: #181b24;
+    --bg-tertiary: #212630;
+    --bg-hover: #2a2f3a;
+    --text-primary: #d0d4dc;
+    --text-secondary: #7c8290;
+    --accent: #3b9eff;
+    --accent-dim: #2d6ea8;
+    --accent-glow: rgba(59, 158, 255, 0.12);
+    --border-color: #2a2e38;
+    --border-light: #353a45;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --error: #f87171;
+    --panel-radius: 6px;
 }
 
 html,
@@ -28,11 +31,13 @@ body {
 }
 
 body {
-    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    font-size: 14px;
+    font-family: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 13px;
     color: var(--text-primary);
     background-color: var(--bg-primary);
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.4;
 }
 
 #app {
@@ -41,30 +46,40 @@ body {
 
 button {
     cursor: pointer;
-    border: none;
-    border-radius: 4px;
-    padding: 6px 14px;
-    font-size: 13px;
+    border: 1px solid var(--border-light);
+    border-radius: 5px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 500;
     color: var(--text-primary);
     background: var(--bg-tertiary);
-    transition: background 0.2s, opacity 0.2s;
+    transition: all 0.15s ease;
+    letter-spacing: 0.01em;
 }
 
 button:hover {
-    background: #1a4a80;
+    background: var(--bg-hover);
+    border-color: #4a4f5a;
 }
 
 button:active {
-    opacity: 0.8;
+    transform: scale(0.97);
+}
+
+button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 button.accent {
     background: var(--accent-dim);
     color: #fff;
+    border-color: var(--accent);
 }
 
 button.accent:hover {
     background: var(--accent);
+    box-shadow: 0 0 12px var(--accent-glow);
 }
 
 input,
@@ -74,17 +89,37 @@ select {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     padding: 4px 8px;
-    font-size: 13px;
+    font-size: 12px;
+    font-family: inherit;
     outline: none;
+    transition: border-color 0.15s;
 }
 
 input:focus,
 select:focus {
     border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-glow);
+}
+
+input[type="number"] {
+    font-variant-numeric: tabular-nums;
+    -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+::selection {
+    background: var(--accent-dim);
+    color: #fff;
 }
 
 ::-webkit-scrollbar {
-    width: 6px;
+    width: 5px;
+    height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -94,4 +129,8 @@ select:focus {
 ::-webkit-scrollbar-thumb {
     background: var(--border-color);
     border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--border-light);
 }
