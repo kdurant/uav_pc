@@ -173,11 +173,10 @@ handleSearch();
           <ControlPanel
             :connected="connectionState === ConnectionState.Connected"
             :device-ip="selectedDevice?.ip"
-            :channel-visible="channelVisible"
             @search="handleSearch"
             @disconnect="handleDisconnect"
             @toggle-status="handleToggleStatus"
-            @update:channel-visible="channelVisible = $event"
+          />
           />
         </div>
       </aside>
@@ -186,7 +185,8 @@ handleSearch();
       <main class="panel panel-center">
         <div class="panel-header">数据预览</div>
         <div class="panel-body chart-body">
-          <ChartView ref="chartRef" :channel-count="4" :max-points="4000" :channel-visible="channelVisible" />
+          <ChartView ref="chartRef" :channel-count="4" :max-points="4000" :channel-visible="channelVisible"
+            @update:channel-visible="channelVisible = $event" />
         </div>
       </main>
 

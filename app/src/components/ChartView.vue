@@ -17,6 +17,10 @@ const props = withDefaults(
   }
 );
 
+const emit = defineEmits<{
+  (e: "update:channelVisible", value: boolean[]): void;
+}>();
+
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const offscreenRef = shallowRef<HTMLCanvasElement | null>(null);
 const containerRef = ref<HTMLDivElement | null>(null);
@@ -56,6 +60,13 @@ function onWheel(e: WheelEvent) {
 function resetZoom() {
   zoomFactor.value = 1.0;
   visiblePoints.value = props.maxPoints;
+  chart.markDirty();
+}
+
+function toggleCh(ch: number) {
+  const arr = [...props.channelVisible];
+  arr[ch] = !arr[ch];
+  emit("update:channelVisible", arr);
   chart.markDirty();
 }
 
@@ -196,23 +207,21 @@ function render(buffers: Float64Array[], width: number, height: number) {
 function resize() {
   const canvas = canvasRef.value;
   const offscreen = offscreenRef.value;
-  const container = containerRef.value;
-  if (!canvas || !offscreen || !container) return;
+  if (!canvas || !offscreen) return;
 
   const dpr = window.devicePixelRatio || 1;
-  const rect = container.getBoundingClientRect();
+  const rect = canvas.getBoundingClientRect();
   const w = rect.width;
   const h = rect.height;
 
+  if (w === 0 || h === 0) return;
+
   canvas.width = w * dpr;
   canvas.height = h * dpr;
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
 
   offscreen.width = w * dpr;
   offscreen.height = h * dpr;
 
-  // 确保离屏 canvas 也使用 devicePixelRatio
   const ctx = canvas.getContext("2d");
   if (ctx) {
     ctx.imageSmoothingEnabled = false;
@@ -250,17 +259,19 @@ defineExpose({
 // 监听 ResizeObserver
 let resizeObserver: ResizeObserver | null = null;
 onMounted(() => {
-  if (containerRef.value) {
+  const canvas = canvasRef.value;
+  const container = containerRef.value;
+  if (canvas) {
     resizeObserver = new ResizeObserver(() => {
       resize();
       chart.markDirty();
     });
-    resizeObserver.observe(containerRef.value);
+    resizeObserver.observe(canvas);
+  }
 
-    // 鼠标滚轮缩放
-    containerRef.value.addEventListener("wheel", onWheel, { passive: false });
-    // 双击重置缩放
-    containerRef.value.addEventListener("dblclick", resetZoom);
+  if (container) {
+    container.addEventListener("wheel", onWheel, { passive: false });
+    container.addEventListener("dblclick", resetZoom);
   }
 });
 onUnmounted(() => {
@@ -274,6 +285,14 @@ onUnmounted(() => {
   <div ref="containerRef" class="chart-container">
     <canvas ref="canvasRef"></canvas>
     <div class="zoom-hint">滚轮X轴缩放 · Ctrl+滚轮Y轴缩放 · 双击重置</div>
+    <div class="channel-bar">
+      <label v-for="ch in props.channelCount" :key="ch" class="ch-cb"
+        :style="{ '--ch-color': props.lineColors[ch-1] }">
+        <input type="checkbox" :checked="props.channelVisible[ch-1]"
+          @change="toggleCh(ch-1)" />
+        <span>CH{{ ch-1 }}</span>
+      </label>
+    </div>
   </div>
 </template>
 
@@ -283,22 +302,56 @@ onUnmounted(() => {
   height: 100%;
   overflow: hidden;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 canvas {
+  flex: 1;
   display: block;
-  width: 100%;
-  height: 100%;
+  min-height: 0;
 }
 
 .zoom-hint {
   position: absolute;
-  bottom: 4px;
+  bottom: 28px;
   left: 50%;
   transform: translateX(-50%);
   font-size: 10px;
   color: rgba(160, 160, 176, 0.4);
   pointer-events: none;
   white-space: nowrap;
+}
+
+.channel-bar {
+  display: flex;
+  gap: 2px;
+  padding: 4px 12px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+.ch-cb {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.ch-cb:hover {
+  border-color: var(--ch-color, var(--accent-dim));
+}
+.ch-cb input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+}
+.ch-cb span {
+  color: var(--ch-color, var(--text-primary));
+  font-weight: 600;
 }
 </style>

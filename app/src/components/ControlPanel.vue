@@ -6,7 +6,6 @@ import { invoke } from "@tauri-apps/api/core";
 const props = defineProps<{
   connected: boolean;
   deviceIp?: string;
-  channelVisible?: boolean[];
 }>();
 
 // ===== 设备连接 =====
@@ -14,19 +13,12 @@ const emit = defineEmits<{
   (e: "search"): void;
   (e: "disconnect"): void;
   (e: "toggle-status", enable: boolean): void;
-  (e: "update:channelVisible", value: boolean[]): void;
 }>();
 
 const statusPollingEnabled = ref(true);
 
 function toggleStatusPolling() {
   emit("toggle-status", statusPollingEnabled.value);
-}
-
-function toggleCh(ch: number) {
-  const arr = [...(props.channelVisible ?? [true, true, true, true])];
-  arr[ch] = !arr[ch];
-  emit("update:channelVisible", arr);
 }
 
 // ===== 激光器控制 =====
@@ -150,18 +142,6 @@ const tabs = [
         <label class="checkbox-row">
           <input type="checkbox" v-model="statusPollingEnabled" @change="toggleStatusPolling" />
           <span>读取设备状态</span>
-        </label>
-      </div>
-    </section>
-
-    <!-- 通道可见性 — 始终可见 -->
-    <section class="ctrl-group" v-if="connected">
-      <h4 class="group-title">显示通道</h4>
-      <div class="ch-vis-row">
-        <label v-for="ch in 4" :key="ch" class="ch-cb" :style="{ '--ch-color': ['#00d4ff','#ff6b6b','#ffd93d','#6bcb77'][ch-1] }">
-          <input type="checkbox" :checked="props.channelVisible?.[ch-1] ?? true"
-            @change="toggleCh(ch-1)" />
-          <span>CH{{ ch-1 }}</span>
         </label>
       </div>
     </section>
@@ -427,37 +407,6 @@ const tabs = [
 .toggle-label {
   color: var(--text-primary);
   font-size: 11px;
-  font-weight: 600;
-}
-
-/* 通道可见性 */
-.ch-vis-row {
-  display: flex;
-  gap: 2px;
-  flex-wrap: wrap;
-}
-.ch-cb {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  cursor: pointer;
-  font-size: 10px;
-  background: var(--bg-primary);
-  padding: 1px 6px;
-  border-radius: 3px;
-  border: 1px solid transparent;
-  transition: border-color 0.15s;
-}
-.ch-cb:hover {
-  border-color: var(--ch-color, var(--accent-dim));
-}
-.ch-cb input[type="checkbox"] {
-  width: 12px;
-  height: 12px;
-  cursor: pointer;
-}
-.ch-cb span {
-  color: var(--ch-color, var(--text-primary));
   font-weight: 600;
 }
 </style>
