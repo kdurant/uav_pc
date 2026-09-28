@@ -2,11 +2,16 @@ import { listen } from "@tauri-apps/api/event";
 import { onUnmounted } from "vue";
 import type { PreviewFrame } from "../types";
 
-export interface PreviewDataCallback {
-    (data: number[][]): void;
+/**
+ * 一帧预览数据：
+ * series[ch][i] 对应绝对采样位置 i 的值（数组索引 = 采样位置，从 0 开始），NaN 表示无数据。
+ * 数组长度为两段提取区间的最大终点，X 轴默认范围由前端在此基础上扩展。
+ */
+export interface PreviewFrameCallback {
+    (series: number[][]): void;
 }
 
-export function usePreviewData(onData: PreviewDataCallback) {
+export function usePreviewData(onFrame: PreviewFrameCallback) {
     let unlistenFn: (() => void) | null = null;
     let active = false;
 
@@ -16,31 +21,40 @@ export function usePreviewData(onData: PreviewDataCallback) {
 
         unlistenFn = await listen<PreviewFrame>("preview-data", (event) => {
             const frame = event.payload;
-            const allData: number[][] = [];
+            if (!frame.channels.length) return;
 
+            // 最大终点（第二段提取位置 + 第二段提取长度）
+            let dataEnd = 0;
             for (const ch of frame.channels) {
-                // 合并第一段和第二段数据
-                const combined = [...ch.seg0_data, ...ch.seg1_data];
-                allData.push(combined);
-            }
-
-            // 所有通道数据对齐到最大长度
-            const maxLen = Math.max(0, ...allData.map(a => a.length));
-            if (maxLen === 0) return;
-
-            // 输出每批数据（每次 push 4 通道各一个值）
-            const batches: number[][] = [];
-            for (let i = 0; i < maxLen; i++) {
-                const batch: number[] = [];
-                for (let ch = 0; ch < 4; ch++) {
-                    batch.push(allData[ch]?.[i] ?? 0);
+                if (ch.seg0_data.length > 0) {
+                    dataEnd = Math.max(dataEnd, ch.seg0_start + ch.seg0_data.length);
                 }
-                batches.push(batch);
+                if (ch.seg1_data.length > 0) {
+                    dataEnd = Math.max(dataEnd, ch.seg1_start + ch.seg1_data.length);
+                }
+            }
+            if (dataEnd <= 0) return;
+
+            // 数组索引 = 绝对采样位置：从 0 到 dataEnd，无数据处为 NaN
+            const len = dataEnd;
+            const series: number[][] = [];
+            for (let c = 0; c < 4; c++) {
+                const ch = frame.channels[c];
+                const arr = new Array<number>(len).fill(NaN);
+                if (ch) {
+                    for (let i = 0; i < ch.seg0_data.length; i++) {
+                        const pos = ch.seg0_start + i;
+                        if (pos >= 0 && pos < len) arr[pos] = ch.seg0_data[i];
+                    }
+                    for (let i = 0; i < ch.seg1_data.length; i++) {
+                        const pos = ch.seg1_start + i;
+                        if (pos >= 0 && pos < len) arr[pos] = ch.seg1_data[i];
+                    }
+                }
+                series.push(arr);
             }
 
-            if (batches.length > 0) {
-                onData(batches);
-            }
+            onFrame(series);
         });
     }
 

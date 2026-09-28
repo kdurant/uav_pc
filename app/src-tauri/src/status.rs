@@ -218,6 +218,9 @@ impl SystemStatus {
         status.gps_store_enable = read_u32(data, &mut offset).unwrap_or(0);
         // gps_week
         status.gps_week = read_u32(data, &mut offset).unwrap_or(0);
+        // 固件在 GPS 段实际多出一个 8 字节字段（sys_status.md 未列出），
+        // 不跳过会导致其后所有字段（激光频率、硬盘容量等）整体错位
+        offset += 8;
         // double gps_second
         status.gps_second = read_f64(data, &mut offset).unwrap_or(0.0);
         // double gps_latitude
@@ -296,8 +299,18 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_disk_and_laser_offset() {
+        // 固件在 GPS 段多出 8 字节，验证跳过后 laser_freq / 硬盘容量落在正确偏移
+        let mut data = vec![0u8; 376];
+        data[328..332].copy_from_slice(&5000u32.to_le_bytes()); // laser_freq
+        data[352..360].copy_from_slice(&1_953_525_168u64.to_le_bytes()); // 1TB 容量（扇区）
+        let status = SystemStatus::parse(&data).unwrap();
+        assert_eq!(status.laser_freq, 5000);
+        assert_eq!(status.sata_dev_tot_sec_num, 1_953_525_168);
+    }
+
+    #[test]
     fn test_motor_speed_ffff() {
-        // motor_raw = 0xFFFF_FFFF => motor_speed = 0
         let mut offset = 0;
         let bytes: Vec<u8> = {
             // Build minimal data up to motor_speed field

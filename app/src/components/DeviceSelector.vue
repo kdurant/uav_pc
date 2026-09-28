@@ -47,7 +47,7 @@ function selectDevice(device: DiscoveredDevice) {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(15, 23, 42, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -63,7 +63,7 @@ function selectDevice(device: DiscoveredDevice) {
 }
 .modal h3 {
   margin-bottom: 16px;
-  font-size: 16px;
+  font-size: 18px;
   color: var(--accent);
 }
 .empty {
@@ -94,7 +94,7 @@ function selectDevice(device: DiscoveredDevice) {
 .device-port {
   color: var(--text-secondary);
   margin-left: 4px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .modal-actions {
   margin-top: 16px;

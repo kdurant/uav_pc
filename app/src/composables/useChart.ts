@@ -32,6 +32,9 @@ export function useChart(options: ChartOptions) {
     let paused = false;
     // 暂停时的冻结数据快照
     let frozenData: Float64Array[] | null = null;
+    // 位置对齐模式：整帧替换，缓冲区索引对应采样点位置（xStart 为起始位置）
+    let frameMode = false;
+    let frameStart = 0;
 
     /** 添加一组数据点（每个通道一个值） */
     function pushData(values: number[]) {
@@ -43,8 +46,31 @@ export function useChart(options: ChartOptions) {
         if (!paused) dirty = true;
     }
 
+    /**
+     * 用一整帧数据替换缓冲区（位置对齐模式）。
+     * series[ch][i] 对应该通道采样点位置 xStart + i 的值，NaN 表示该位置无数据（空档）。
+     */
+    function setFrame(series: number[][], xStart: number) {
+        frameMode = true;
+        frameStart = xStart;
+        const len = series.reduce((m, s) => Math.max(m, s.length), 0);
+        for (let ch = 0; ch < channels; ch++) {
+            if (buffers[ch].length < len) buffers[ch] = new Float64Array(len);
+            const src = series[ch] || [];
+            for (let i = 0; i < len; i++) {
+                buffers[ch][i] = i < src.length ? src[i] : NaN;
+            }
+        }
+        count = len;
+        writeIdx = 0;
+        if (!paused) dirty = true;
+    }
+
     /** 获取按时间顺序排列的指定通道数据（从旧到新） */
     function getChannelData(ch: number): Float64Array {
+        if (frameMode) {
+            return buffers[ch].subarray(0, Math.min(count, buffers[ch].length));
+        }
         if (count < maxPoints) {
             return buffers[ch].subarray(0, count);
         }
@@ -63,6 +89,7 @@ export function useChart(options: ChartOptions) {
         }
         writeIdx = 0;
         count = 0;
+        frameMode = false;
         dirty = true;
     }
 
@@ -159,6 +186,7 @@ export function useChart(options: ChartOptions) {
 
     return {
         pushData,
+        setFrame,
         clear,
         setChannelCount,
         renderLoop,

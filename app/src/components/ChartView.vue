@@ -12,7 +12,7 @@ const props = withDefaults(
   {
     channelCount: 4,
     maxPoints: 4000,
-    lineColors: () => ["#00d4ff", "#ff6b6b", "#ffd93d", "#6bcb77"],
+    lineColors: () => ["#2563eb", "#dc2626", "#ca8a04", "#16a34a"],
     channelVisible: () => [true, true, true, true],
   }
 );
@@ -47,10 +47,12 @@ let lastYMin = NaN;
 let lastYMax = NaN;
 let lastWidth = 0;
 
-const gridColor = "rgba(70, 80, 100, 0.55)";
-const textColor = "#7c8290";
-const axisColor = "rgba(90, 100, 120, 0.7)";
-const fontSize = 10;
+const gridColor = "rgba(120, 130, 150, 0.25)";
+const textColor = "#667085";
+const axisColor = "rgba(90, 100, 120, 0.55)";
+const canvasBg = "#ffffff";
+const hiddenColor = "rgba(140, 145, 160, 0.45)";
+const fontSize = 12;
 
 // 鼠标悬停坐标（canvas 像素坐标，-1 表示不在图表区域）
 let hoverX = -1;
@@ -61,8 +63,25 @@ let lastRenderState = {
   plotW: 0, plotH: 0,
   startIdx: 0, visibleLen: 0,
   yMin: 0, yMax: 0,
+  xOffset: 0,
   buffers: [] as Float64Array[],
 };
+
+// 位置对齐模式：显示整帧数据，缓冲区索引 = 绝对采样位置（从 0 开始）
+const frameMode = ref(false);
+const frameStart = ref(0);
+// X 轴默认右端 = 第二段终点 * 1.2
+const frameAxisEnd = ref(0);
+const DEFAULT_X_SCALE = 1.2;
+
+/** 用一整帧预览数据刷新图表（按绝对采样位置对齐，NaN 为空档） */
+function setFrame(series: number[][]) {
+  frameMode.value = true;
+  frameStart.value = 0;
+  const len = series.reduce((m, s) => Math.max(m, s.length), 0);
+  frameAxisEnd.value = Math.max(1, Math.round(len * DEFAULT_X_SCALE));
+  chart.setFrame(series, 0);
+}
 
 // 框选缩放状态
 let isDragging = false;
@@ -124,10 +143,10 @@ function onMouseUp(e: MouseEvent) {
     return;
   }
 
-  const { margin, plotW, plotH, startIdx, visibleLen, yMin, yMax } = lastRenderState;
+  const { margin, plotW, plotH, startIdx, visibleLen, yMin, yMax, xOffset } = lastRenderState;
 
-  // 转换像素坐标到数据坐标
-  const toDataX = (px: number) => startIdx + ((px - margin.left) / plotW) * (visibleLen - 1);
+  // 转换像素坐标到数据坐标（X 为采样点位置）
+  const toDataX = (px: number) => xOffset + startIdx + ((px - margin.left) / plotW) * (visibleLen - 1);
   const toDataY = (py: number) => yMax - ((py - margin.top) / plotH) * (yMax - yMin);
 
   const boxLeft = Math.min(x0, x1);
@@ -192,6 +211,17 @@ function onWheel(e: WheelEvent) {
   if (e.ctrlKey || e.metaKey) {
     const delta = e.deltaY > 0 ? 1.15 : 1 / 1.15;
     zoomFactor.value = Math.max(0.1, Math.min(50, zoomFactor.value * delta));
+  } else if (frameMode.value) {
+    // 位置对齐模式：滚轮按采样点位置缩放 X（写入手动范围）
+    const { startIdx, visibleLen, xOffset } = lastRenderState;
+    if (visibleLen > 1) {
+      const center = xOffset + startIdx + (visibleLen - 1) / 2;
+      const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+      const half = Math.max(1, ((visibleLen - 1) / 2) * factor);
+      xStartManual.value = Math.max(0, Math.round(center - half));
+      xEndManual.value = Math.min(frameAxisEnd.value, Math.round(center + half));
+      useManualRangeX.value = true;
+    }
   } else if (e.shiftKey) {
     const delta = e.deltaY > 0 ? 100 : -100;
     visiblePoints.value = Math.max(100, Math.min(props.maxPoints, visiblePoints.value + delta));
@@ -229,11 +259,17 @@ function render(buffers: Float64Array[], width: number, height: number) {
   const plotH = height - margin.top - margin.bottom;
 
   const totalPoints = buffers[0]?.length || 0;
-  // X 轴：manual 优先，否则自动显示最新 N 点
+  // X 轴：位置对齐模式显示整帧；手动范围优先；否则自动显示最新 N 点
+  const xOffset = frameMode.value ? frameStart.value : 0;
   let startIdx: number, visibleLen: number;
   if (useManualRangeX.value && totalPoints > 0) {
-    startIdx = Math.max(0, Math.min(totalPoints - 1, Math.round(xStartManual.value)));
-    visibleLen = Math.max(1, Math.min(totalPoints - startIdx, Math.round(xEndManual.value) - startIdx + 1));
+    // 手动范围输入的是采样点位置，减去帧起始位置换算成索引
+    startIdx = Math.max(0, Math.min(totalPoints - 1, Math.round(xStartManual.value - xOffset)));
+    visibleLen = Math.max(1, Math.round(xEndManual.value - xOffset) - startIdx + 1);
+  } else if (frameMode.value && totalPoints > 0) {
+    // 默认 X 轴范围 [0, 第二段终点 * 1.2]，超出数据的部分留空
+    startIdx = 0;
+    visibleLen = Math.max(1, frameAxisEnd.value + 1);
   } else {
     startIdx = Math.max(0, totalPoints - Math.round(visiblePoints.value));
     visibleLen = Math.min(Math.round(visiblePoints.value), totalPoints);
@@ -253,6 +289,7 @@ function render(buffers: Float64Array[], width: number, height: number) {
       const end = Math.min(startIdx + visibleLen, buf.length);
       for (let i = startIdx; i < end; i++) {
         const v = buf[i];
+        if (!Number.isFinite(v)) continue; // 空档（无数据）
         if (v < yMin) yMin = v;
         if (v > yMax) yMax = v;
       }
@@ -270,8 +307,12 @@ function render(buffers: Float64Array[], width: number, height: number) {
 
   // 清除
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#0f1117";
+  ctx.fillStyle = canvasBg;
   ctx.fillRect(0, 0, width, height);
+
+  // 复位文本对齐：悬停提示会把 textBaseline 设为 "top"，不复位会导致
+  // X 轴刻度以 height-2 为顶部向下绘制、跑到画布外而不可见
+  ctx.textBaseline = "alphabetic";
 
   // 绘图区域边框（轴线用更亮的颜色）
   ctx.strokeStyle = axisColor;
@@ -310,17 +351,19 @@ function render(buffers: Float64Array[], width: number, height: number) {
       ctx.lineTo(x, margin.top + plotH);
       ctx.stroke();
 
-      const idx = Math.round(startIdx + (visibleLen / xLabels) * i);
-      ctx.fillText(String(idx), x, height - 2);
+      const idx = Math.round(startIdx + ((visibleLen - 1) / xLabels) * i);
+      ctx.fillText(String(idx + xOffset), x, height - 2);
     }
   } else {
     // 仅 X 轴标签（无网格线）
+    ctx.fillStyle = textColor;
+    ctx.font = `${fontSize}px monospace`;
     ctx.textAlign = "center";
     const xLabels = 4;
     for (let i = 0; i <= xLabels; i++) {
       const x = margin.left + (plotW / xLabels) * i;
-      const idx = Math.round(startIdx + (visibleLen / xLabels) * i);
-      ctx.fillText(String(idx), x, height - 2);
+      const idx = Math.round(startIdx + ((visibleLen - 1) / xLabels) * i);
+      ctx.fillText(String(idx + xOffset), x, height - 2);
     }
   }
 
@@ -347,8 +390,13 @@ function render(buffers: Float64Array[], width: number, height: number) {
 
     let firstPoint = true;
     for (let i = startIdx; i < startIdx + visibleLen && i < buf.length; i++) {
+      const v = buf[i];
+      if (!Number.isFinite(v)) {
+        firstPoint = true; // 空档：断开折线，下一段重新起笔
+        continue;
+      }
       const x = margin.left + ((i - startIdx) / totalDrawn) * plotW;
-      const y = margin.top + plotH - ((buf[i] - yMin) / (yMax - yMin)) * plotH;
+      const y = margin.top + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
 
       if (showDots.value) {
         ctx.fillRect(x - dotRadius, y - dotRadius, dotRadius * 2, dotRadius * 2);
@@ -371,15 +419,15 @@ function render(buffers: Float64Array[], width: number, height: number) {
   for (let ch = 0; ch < Math.min(buffers.length, 4); ch++) {
     const x = margin.left + 4 + ch * 80;
     const y = margin.top - 2;
-    ctx.fillStyle = props.channelVisible[ch] ? props.lineColors[ch] : "rgba(160, 160, 176, 0.3)";
+    ctx.fillStyle = props.channelVisible[ch] ? props.lineColors[ch] : hiddenColor;
     ctx.fillRect(x, y, 10, 2);
-    ctx.fillStyle = props.channelVisible[ch] ? textColor : "rgba(160, 160, 176, 0.3)";
+    ctx.fillStyle = props.channelVisible[ch] ? textColor : hiddenColor;
     ctx.font = `${fontSize - 1}px sans-serif`;
     ctx.fillText(props.channelVisible[ch] ? `CH${ch}` : `CH${ch}(隐藏)`, x + 13, y + 3);
   }
 
   // 保存渲染参数供 overlay 使用
-  lastRenderState = { margin, plotW, plotH, startIdx, visibleLen, yMin, yMax, buffers };
+  lastRenderState = { margin, plotW, plotH, startIdx, visibleLen, yMin, yMax, xOffset, buffers };
 
   // ---- 鼠标悬停十字光标 + 坐标提示 ----
   const dpr = window.devicePixelRatio || 1;
@@ -393,9 +441,9 @@ function render(buffers: Float64Array[], width: number, height: number) {
     const sw = Math.abs(dragCurrentX - dragStartX) * dpr;
     const sh = Math.abs(dragCurrentY - dragStartY) * dpr;
 
-    ctx.fillStyle = "rgba(59, 158, 255, 0.08)";
+    ctx.fillStyle = "rgba(37, 99, 235, 0.10)";
     ctx.fillRect(sx, sy, sw, sh);
-    ctx.strokeStyle = "rgba(59, 158, 255, 0.5)";
+    ctx.strokeStyle = "rgba(37, 99, 235, 0.55)";
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 2]);
     ctx.strokeRect(sx, sy, sw, sh);
@@ -414,7 +462,7 @@ function render(buffers: Float64Array[], width: number, height: number) {
     // 十字光标
     ctx.save();
     ctx.setLineDash([4, 3]);
-    ctx.strokeStyle = "rgba(200, 205, 220, 0.25)";
+    ctx.strokeStyle = "rgba(60, 70, 90, 0.35)";
     ctx.lineWidth = 0.8;
     // 竖线
     ctx.beginPath();
@@ -431,7 +479,9 @@ function render(buffers: Float64Array[], width: number, height: number) {
 
     // 在十字交叉点处标记最近的数据点（每个可见通道一个圆点）
     const tipLines: string[] = [];
-    tipLines.push(`X = ${nearIdx}`);
+    const tipColors: string[] = [];
+    tipLines.push(`X = ${nearIdx + xOffset}`);
+    tipColors.push(textColor);
 
     for (let ch = 0; ch < Math.min(buffers.length, 4); ch++) {
       if (!props.channelVisible[ch]) continue;
@@ -439,21 +489,23 @@ function render(buffers: Float64Array[], width: number, height: number) {
       if (nearIdx < 0 || nearIdx >= buf.length) continue;
 
       const val = buf[nearIdx];
+      if (!Number.isFinite(val)) continue; // 空档：无数据
       const px = margin.left + ((nearIdx - startIdx) / Math.max(1, visibleLen - 1)) * plotW;
       const py = margin.top + plotH - ((val - yMin) / (yMax - yMin || 1)) * plotH;
 
       // 实心圆点
       const dotR = 3.5;
-      const color = props.lineColors[ch] || "#fff";
+      const color = props.lineColors[ch] || "#333333";
       ctx.beginPath();
       ctx.arc(px, py, dotR, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
-      ctx.strokeStyle = "#0f1117";
+      ctx.strokeStyle = canvasBg;
       ctx.lineWidth = 1;
       ctx.stroke();
 
       tipLines.push(`CH${ch} = ${val.toFixed(1)}`);
+      tipColors.push(color);
     }
 
     // 绘制坐标提示框
@@ -472,8 +524,8 @@ function render(buffers: Float64Array[], width: number, height: number) {
       if (by + boxH > margin.top + plotH) by = margin.top + plotH - boxH;
 
       // 背景
-      ctx.fillStyle = "rgba(15, 17, 23, 0.88)";
-      ctx.strokeStyle = "rgba(120, 130, 150, 0.5)";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+      ctx.strokeStyle = "rgba(120, 130, 150, 0.45)";
       ctx.lineWidth = 0.8;
       ctx.beginPath();
       ctx.roundRect(bx, by, boxW, boxH, 3);
@@ -484,7 +536,7 @@ function render(buffers: Float64Array[], width: number, height: number) {
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       for (let i = 0; i < tipLines.length; i++) {
-        ctx.fillStyle = i === 0 ? textColor : (props.lineColors[i - 1] || "#fff");
+        ctx.fillStyle = tipColors[i] || textColor;
         ctx.fillText(tipLines[i], bx + padding, by + padding + i * lineH);
       }
     }
@@ -532,6 +584,7 @@ onUnmounted(() => chart.stop());
 
 defineExpose({
   pushData: chart.pushData,
+  setFrame,
   clear: chart.clear,
   setChannelCount: chart.setChannelCount,
   resetZoom,
@@ -570,7 +623,6 @@ onUnmounted(() => {
 <template>
   <div ref="containerRef" class="chart-container">
     <canvas ref="canvasRef"></canvas>
-    <div class="zoom-hint">滚轮X轴缩放 · Ctrl+滚轮Y轴缩放 · 框选放大 · 双击重置</div>
     <div class="channel-bar">
       <!-- 通道可见性 -->
       <label v-for="ch in props.channelCount" :key="ch" class="ch-cb"
@@ -581,9 +633,9 @@ onUnmounted(() => {
       <span class="sep"></span>
       <!-- 坐标范围 X -->
       <span class="bar-label">X:</span>
-      <input type="number" v-model.number="xStartManual" class="range-inp" title="X 起始索引" />
+      <input type="number" v-model.number="xStartManual" class="range-inp" title="X 起始采样位置" />
       <span class="bar-label">~</span>
-      <input type="number" v-model.number="xEndManual" class="range-inp" title="X 结束索引" />
+      <input type="number" v-model.number="xEndManual" class="range-inp" title="X 结束采样位置" />
       <span class="sep"></span>
       <!-- 坐标范围 Y -->
       <span class="bar-label">Y:</span>
@@ -607,6 +659,7 @@ onUnmounted(() => {
         <input type="checkbox" v-model="autoRefresh" @change="onRefreshToggle" />
         <span :style="{ color: autoRefresh ? undefined : 'var(--warning)' }">{{ autoRefresh ? '实时' : '暂停' }}</span>
       </label>
+      <span class="zoom-hint">滚轮X轴缩放 · Ctrl+滚轮Y轴缩放 · 框选放大 · 双击重置</span>
     </div>
   </div>
 </template>
@@ -629,14 +682,11 @@ canvas {
 }
 
 .zoom-hint {
-  position: absolute;
-  bottom: 28px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 10px;
-  color: rgba(160, 160, 176, 0.4);
-  pointer-events: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.65;
   white-space: nowrap;
+  padding: 2px 6px;
 }
 
 .channel-bar {
@@ -656,17 +706,17 @@ canvas {
   margin: 0 6px;
 }
 .bar-label {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 .range-inp {
   width: 68px;
-  font-size: 12px;
+  font-size: 14px;
   padding: 2px 6px;
   height: 22px;
 }
 .bar-btn {
-  font-size: 12px;
+  font-size: 14px;
   padding: 3px 10px;
   height: 22px;
   line-height: 1;
@@ -676,7 +726,7 @@ canvas {
   align-items: center;
   gap: 4px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 14px;
   padding: 2px 8px;
   border-radius: 3px;
   border: 1px solid transparent;

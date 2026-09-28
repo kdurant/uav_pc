@@ -1,12 +1,12 @@
 [basic]
-local_ip = "192.168.93.44"
+local_ip = "192.168.1.111"
 local_port = 12345
 remote_port = 6666
 
 [capture]
 preview_coe = 1000
 ref_channal = 1
-save_channal = 0xff
+save_channal = 255
 wave_len = 6000
 first_pos = 100
 first_len = 200
@@ -15,3 +15,7 @@ second_len = 400
 sum_value = 0
 max_value = 0
 pin_threshold = 1000
+
+[gps]
+# GPS 数据文件所在目录（设备端路径），可用 0x0110 的 ls 查询
+dir = "/run/media/mmcblk1p1/"

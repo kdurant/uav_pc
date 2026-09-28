@@ -7,20 +7,20 @@
 }
 
 :root {
-    --bg-primary: #0f1117;
-    --bg-secondary: #181b24;
-    --bg-tertiary: #212630;
-    --bg-hover: #2a2f3a;
-    --text-primary: #d0d4dc;
-    --text-secondary: #7c8290;
-    --accent: #3b9eff;
-    --accent-dim: #2d6ea8;
-    --accent-glow: rgba(59, 158, 255, 0.12);
-    --border-color: #2a2e38;
-    --border-light: #353a45;
-    --success: #34d399;
-    --warning: #fbbf24;
-    --error: #f87171;
+    --bg-primary: #f2f4f7;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #eef1f5;
+    --bg-hover: #e3e7ee;
+    --text-primary: #1f2530;
+    --text-secondary: #667085;
+    --accent: #2563eb;
+    --accent-dim: #1d4ed8;
+    --accent-glow: rgba(37, 99, 235, 0.15);
+    --border-color: #dfe3e8;
+    --border-light: #cbd2da;
+    --success: #16a34a;
+    --warning: #d97706;
+    --error: #dc2626;
     --panel-radius: 6px;
 }
 
@@ -32,7 +32,7 @@ body {
 
 body {
     font-family: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-    font-size: 13px;
+    font-size: 15px;
     color: var(--text-primary);
     background-color: var(--bg-primary);
     -webkit-font-smoothing: antialiased;
@@ -49,7 +49,7 @@ button {
     border: 1px solid var(--border-light);
     border-radius: 5px;
     padding: 5px 12px;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     color: var(--text-primary);
     background: var(--bg-tertiary);
@@ -59,7 +59,7 @@ button {
 
 button:hover {
     background: var(--bg-hover);
-    border-color: #4a4f5a;
+    border-color: #9aa4b2;
 }
 
 button:active {
@@ -89,7 +89,7 @@ select {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     padding: 4px 8px;
-    font-size: 12px;
+    font-size: 14px;
     font-family: inherit;
     outline: none;
     transition: border-color 0.15s;

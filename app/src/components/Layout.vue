@@ -12,11 +12,17 @@ import { ConnectionState } from "../types";
 const { devices, isSearching, selectedDevice, searchDevices, selectDevice, clearSelection } =
   useDeviceDiscovery();
 
-const { status, start: startStatus, stop: stopStatus } = useSystemStatus();
+const { status, stale: statusStale, start: startStatus, stop: stopStatus } = useSystemStatus();
 
 const connectionState = ref<ConnectionState>(ConnectionState.Disconnected);
 const showDeviceSelector = ref(false);
 const isConnecting = ref(false);
+
+// 控制面板当前 tab（存储 tab 需要更宽以显示文件表格）
+const controlTab = ref("capture");
+function handleTabChange(tab: string) {
+  controlTab.value = tab;
+}
 
 // 通道可见性
 const channelVisible = ref([true, true, true, true]);
@@ -24,14 +30,12 @@ const channelVisible = ref([true, true, true, true]);
 // Chart ref
 const chartRef = ref<InstanceType<typeof ChartView> | null>(null);
 
-// Preview data → ChartView
-function pushPreviewData(batches: number[][]) {
-  for (const batch of batches) {
-    chartRef.value?.pushData(batch);
-  }
+// Preview data → ChartView（整帧、按绝对采样位置对齐）
+function pushPreviewFrame(series: number[][]) {
+  chartRef.value?.setFrame(series);
 }
 
-const previewOutput = usePreviewData(pushPreviewData);
+const previewOutput = usePreviewData(pushPreviewFrame);
 
 const statusLabel = computed(() => {
   switch (connectionState.value) {
@@ -157,10 +161,15 @@ handleSearch();
       </div>
     </header>
 
+    <!-- 设备状态中断告警：3 秒未收到状态上传 -->
+    <div v-if="statusStale" class="status-alert">
+      ⚠ 设备状态数据中断：已超过 3 秒未收到设备上传
+    </div>
+
     <!-- Main content: three columns -->
     <div class="main-content">
       <!-- Left: Control Panel -->
-      <aside class="panel panel-left">
+      <aside class="panel panel-left" :class="{ 'panel-left-wide': controlTab === 'storage' }">
         <div class="panel-header">控制面板</div>
         <div class="panel-body">
           <ControlPanel
@@ -169,6 +178,7 @@ handleSearch();
             @search="handleSearch"
             @disconnect="handleDisconnect"
             @toggle-status="handleToggleStatus"
+            @tab-change="handleTabChange"
           />
         </div>
       </aside>
@@ -235,11 +245,29 @@ handleSearch();
   justify-content: flex-end;
 }
 .app-title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--accent);
   white-space: nowrap;
   letter-spacing: 0.03em;
+}
+
+/* 设备状态中断告警 */
+.status-alert {
+  flex-shrink: 0;
+  padding: 7px 16px;
+  background: var(--error);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.05em;
+  animation: alert-blink 1s ease-in-out infinite;
+}
+@keyframes alert-blink {
+  50% {
+    opacity: 0.4;
+  }
 }
 
 /* Main content area */
@@ -263,6 +291,11 @@ handleSearch();
   min-width: 200px;
   flex-shrink: 0;
 }
+/* 存储 tab：左栏加宽以容纳 SSD 文件表格 */
+.panel-left-wide {
+  width: 440px;
+  transition: width 0.15s ease;
+}
 .panel-center {
   flex: 1;
   min-width: 400px;
@@ -274,7 +307,7 @@ handleSearch();
 }
 .panel-header {
   padding: 9px 14px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-secondary);
   background: var(--bg-tertiary);
@@ -299,7 +332,7 @@ handleSearch();
 }
 .placeholder {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
   opacity: 0.6;
 }
 </style>

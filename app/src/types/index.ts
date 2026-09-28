@@ -102,6 +102,17 @@ export interface AppConfig {
     };
 }
 
+/** SSD 已存储文件（对应 Rust SsdFile） */
+export interface SsdFile {
+    name: string;
+    /** 起始地址（单位：扇区，512 字节） */
+    start: number;
+    /** 结束地址（单位：扇区，512 字节） */
+    end: number;
+    /** 文件大小（字节） */
+    size: number;
+}
+
 /** 连接状态 */
 export enum ConnectionState {
     Disconnected = "disconnected",

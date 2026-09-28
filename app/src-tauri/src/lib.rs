@@ -16,8 +16,8 @@ async fn background_udp_listener(
     app: tauri::AppHandle,
     frame_tx: broadcast::Sender<(crate::protocol::Frame, std::net::SocketAddr)>,
 ) {
-    // 等待网络初始化（最多等 10 秒）
-    let mut attempts = 0;
+    // 等待网络初始化：网络在首个命令下发时创建，可能晚于窗口加载，
+    // 因此一直等待（此前限制 10 秒会在前端加载慢时放弃，导致收不到状态帧）
     let network = loop {
         let state = app.state::<Arc<Mutex<NetworkState>>>();
         let guard = state.lock().await;
@@ -26,12 +26,6 @@ async fn background_udp_listener(
             break net;
         }
         drop(guard);
-
-        attempts += 1;
-        if attempts > 100 {
-            log::error!("Network not initialized after 10s, giving up");
-            return;
-        }
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     };
 
@@ -99,8 +93,8 @@ async fn background_udp_listener(
 pub fn run() {
     env_logger::init();
 
-    let app_config = config::AppConfig::load("config.toml")
-        .expect("Failed to load config.toml");
+    let app_config = config::AppConfig::load_or_create("config.toml")
+        .expect("Failed to load or create config.toml");
 
     let (frame_tx, _) = broadcast::channel::<(crate::protocol::Frame, std::net::SocketAddr)>(256);
     let frame_tx_setup = frame_tx.clone();
@@ -128,8 +122,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::discover_devices,
             commands::query_sys_status,
+            commands::send_ref_channel,
             commands::send_command,
             commands::start_preview,
+            commands::list_ssd_files,
+            commands::query_gps_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

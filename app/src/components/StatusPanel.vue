@@ -13,12 +13,10 @@ function formatUptime(seconds: number): string {
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
+/** 硬盘容量：单位 GB，按 1GB = 1024MB（1024³ 字节）换算 */
 function formatDiskSize(sectors: number): string {
   const bytes = sectors * 512;
-  if (bytes >= 1e12) return (bytes / 1e12).toFixed(2) + " TB";
-  if (bytes >= 1e9) return (bytes / 1e9).toFixed(2) + " GB";
-  if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + " MB";
-  return bytes + " B";
+  return (bytes / 1024 ** 3).toFixed(2) + " GB";
 }
 
 /** 状态值格式化，保留 2 位小数 */
@@ -45,7 +43,7 @@ const adcChannelLabels = [
   "板载热敏2",
 ];
 
-/** 获取 ADC 通道值 */
+/** 获取 ADC 通道原始值 */
 function adcValue(ch: number): number {
   if (!props.status) return 0;
   const values = [
@@ -53,6 +51,70 @@ function adcValue(ch: number): number {
     props.status.adc_ch4, props.status.adc_ch5, props.status.adc_ch6, props.status.adc_ch7,
   ];
   return values[ch] ?? 0;
+}
+
+/** ADC 数字值 → 模拟电压：16 位，满量程 5V */
+const ADC_FULL_SCALE = 65536;
+const ADC_VREF = 5.0;
+
+function adcVoltage(ch: number): number {
+  return (adcValue(ch) / ADC_FULL_SCALE) * ADC_VREF;
+}
+
+/** APD 高压反馈换算系数：Vhv = Vadc * 293 * 0.798 */
+const APD_HV_COEFF = 293 * 0.798;
+/** APD 高压反馈满量程电压（用于进度条归一化） */
+const APD_HV_FULL = ADC_VREF * APD_HV_COEFF;
+
+/** 板载热敏电阻通道编号（ch6=板载热敏1, ch7=板载热敏2） */
+const THERMISTOR_CHANNELS = [6, 7];
+
+/** ADC 通道显示文本：电压反馈显示电压，热敏电阻换算温度 */
+function adcText(ch: number): string {
+  if (!props.status) return "-";
+  if (ch <= 2) return adcVoltage(ch).toFixed(3) + " V"; // PMT1~3 反馈
+  if (ch === 3) return (adcVoltage(ch) * APD_HV_COEFF).toFixed(1) + " V"; // APD 高压反馈
+  if (THERMISTOR_CHANNELS.includes(ch)) {
+    const t = thermistorValues(ch);
+    return t ? t.temp.toFixed(2) + " °C" : "开路";
+  }
+  return String(adcValue(ch)); // 外置热敏1/2（未连接）：保留原始值
+}
+
+/**
+ * 板载热敏电阻换算（单位：V/Ω/℃）：
+ *   Vres = value * 0.0000625 * 1.051
+ *   Rres = 10000 / (3.3 - Vres) * Vres
+ *   Temp = 1 / (ln(Rres/10000)/3380 + 1/(273.15+25)) - 273.15 + 0.5
+ * 电压达到/超过 3.3V（探头开路）时返回 null。
+ */
+function thermistorValues(ch: number): { vres: number; rres: number; temp: number } | null {
+  const value = adcValue(ch);
+  const vres = value * 0.0000625 * 1.051;
+  const denom = 3.3 - vres;
+  if (vres <= 0 || denom <= 0) return null;
+  const rres = (10000 / denom) * vres;
+  if (!(rres > 0)) return null;
+  const temp = 1 / (Math.log(rres / 10000) / 3380 + 1 / (273.15 + 25)) - 273.15 + 0.5;
+  if (!Number.isFinite(temp)) return null;
+  return { vres, rres, temp };
+}
+
+/** 热敏电阻通道悬浮提示：显示 Vres / Rres / Temp */
+function adcTitle(ch: number): string | undefined {
+  if (!props.status || !THERMISTOR_CHANNELS.includes(ch)) return undefined;
+  const value = adcValue(ch);
+  const vres = value * 0.0000625 * 1.051;
+  const t = thermistorValues(ch);
+  if (!t) return `Vres=${vres.toFixed(4)} V（超量程/探头开路）`;
+  return `Vres=${t.vres.toFixed(4)} V, Rres=${t.rres.toFixed(0)} Ω, Temp=${t.temp.toFixed(2)} °C`;
+}
+
+/** ADC 通道进度条比例(0~1) */
+function adcRatio(ch: number): number {
+  if (!props.status) return 0;
+  if (ch === 3) return Math.min((adcVoltage(ch) * APD_HV_COEFF) / APD_HV_FULL, 1);
+  return Math.min(adcValue(ch) / ADC_FULL_SCALE, 1);
 }
 
 /** sys_status0 错误标记 */
@@ -152,9 +214,9 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <div v-for="(label, i) in adcChannelLabels" :key="i" class="adc-row">
         <span class="adc-label">{{ label }}</span>
         <div class="adc-bar-wrap">
-          <div class="adc-bar" :style="{ width: Math.min((adcValue(i) / 4096) * 100, 100) + '%' }"></div>
+          <div class="adc-bar" :style="{ width: adcRatio(i) * 100 + '%' }"></div>
         </div>
-        <span class="adc-val">{{ adcValue(i) }}</span>
+        <span class="adc-val" :title="adcTitle(i)">{{ adcText(i) }}</span>
       </div>
     </section>
 
@@ -202,19 +264,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       </div>
       <div class="status-row">
         <span class="label">硬盘容量</span>
-        <span class="value">{{ formatDiskSize(status.sata_dev_tot_sec_num) }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">写入位置</span>
-        <span class="value">{{ formatDiskSize(status.sata_app_lba_next) }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">写耗时(8ns)</span>
-        <span class="value">{{ props.status.max_write_time }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">预览写/读</span>
-        <span class="value">{{ props.status.preview_wr_cnt }} / {{ props.status.preview_rd_cnt }}</span>
+        <span class="value">{{ formatDiskSize(props.status.sata_dev_tot_sec_num) }}</span>
       </div>
     </section>
 
@@ -243,15 +293,15 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       </div>
       <div class="status-row">
         <span class="label">方位角</span>
-        <span class="value">{{ fmt(status.gps_azimuth, 2) }}°</span>
+        <span class="value">{{ fmt(props.status.gps_azimuth, 2) }}°</span>
       </div>
       <div class="status-row">
         <span class="label">俯仰角</span>
-        <span class="value">{{ fmt(status.gps_pitch, 2) }}°</span>
+        <span class="value">{{ fmt(props.status.gps_pitch, 2) }}°</span>
       </div>
       <div class="status-row">
         <span class="label">横滚角</span>
-        <span class="value">{{ fmt(status.gps_roll, 2) }}°</span>
+        <span class="value">{{ fmt(props.status.gps_roll, 2) }}°</span>
       </div>
     </section>
   </div>
@@ -262,7 +312,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 
 <style scoped>
 .status-panel {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .status-group {
@@ -270,7 +320,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 }
 
 .status-group h4 {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--accent);
   text-transform: uppercase;
@@ -291,7 +341,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 .label {
   color: var(--text-secondary);
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .value {
@@ -303,7 +353,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 
 .mono {
   font-family: "Cascadia Code", "Fira Code", monospace;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 /* ADC bar */
@@ -315,8 +365,8 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 }
 .adc-label {
   color: var(--text-secondary);
-  font-size: 10px;
-  width: 64px;
+  font-size: 12px;
+  width: 78px;
   flex-shrink: 0;
   text-align: right;
 }
@@ -335,8 +385,8 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 }
 .adc-val {
   color: var(--text-primary);
-  font-size: 10px;
-  width: 44px;
+  font-size: 12px;
+  width: 74px;
   text-align: right;
   font-family: "Cascadia Code", "Fira Code", monospace;
   font-variant-numeric: tabular-nums;
@@ -355,7 +405,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 /* FIFO warnings */
 .fifo-warn {
   color: var(--error);
-  font-size: 11px;
+  font-size: 13px;
   padding: 2px 0;
 }
 
@@ -366,7 +416,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
   justify-content: center;
   height: 200px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 14px;
   opacity: 0.6;
 }
 </style>
