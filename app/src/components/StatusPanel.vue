@@ -28,7 +28,7 @@ function fmt(v: number | undefined, digits = 2): string {
 /** 电机转速格式化 */
 function fmtMotorSpeed(v: number | undefined): string {
   if (v === undefined) return "-";
-  return (v / 60).toFixed(1) + " Hz";
+  return (v / 60).toFixed(1);
 }
 
 /** ADC 通道标签 */
@@ -152,119 +152,133 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
     <!-- 设备信息 -->
     <section class="status-group">
       <h4>设备信息</h4>
-      <div class="status-row">
-        <span class="label">设备SN</span>
-        <span class="value">{{ props.status.device_sn || "-" }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">设备类型</span>
-        <span class="value">{{ props.status.device_type || "-" }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">运行时间</span>
-        <span class="value">{{ formatUptime(props.status.uptime) }}</span>
+      <div class="row-list">
+        <div class="status-row">
+          <span class="label">设备SN</span>
+          <span class="value mono">{{ props.status.device_sn || "-" }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">设备类型</span>
+          <span class="value">{{ props.status.device_type || "-" }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">运行时间</span>
+          <span class="value mono">{{ formatUptime(props.status.uptime) }}</span>
+        </div>
       </div>
     </section>
 
     <!-- 版本 -->
     <section class="status-group">
       <h4>版本信息</h4>
-      <div class="status-row">
-        <span class="label">PS版本</span>
-        <span class="value mono">{{ props.status.ps_version || "-" }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">PL版本</span>
-        <span class="value mono">{{ props.status.pl_version || "-" }}</span>
+      <div class="row-list">
+        <div class="status-row">
+          <span class="label">PS版本</span>
+          <span class="value mono">{{ props.status.ps_version || "-" }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">PL版本</span>
+          <span class="value mono">{{ props.status.pl_version || "-" }}</span>
+        </div>
       </div>
     </section>
 
     <!-- 环境参数 -->
     <section class="status-group">
       <h4>环境参数</h4>
-      <div class="status-row">
-        <span class="label">板载温度</span>
-        <span class="value">{{ fmt(props.status.i2c_temp, 1) }} °C</span>
+      <div class="metric-grid">
+        <div class="metric">
+          <span class="metric-label">板载温度</span>
+          <span class="metric-value">{{ fmt(props.status.i2c_temp, 1) }}<i>°C</i></span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">电机转速</span>
+          <span class="metric-value">{{ fmtMotorSpeed(props.status.motor_speed) }}<i>Hz</i></span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">触发周期</span>
+          <span class="metric-value">{{ fmt(props.status.trg_cycle, 1) }}<i>Hz</i></span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">PPS 周期</span>
+          <span class="metric-value">{{ fmt(props.status.pps_cycle, 1) }}<i>Hz</i></span>
+        </div>
       </div>
-      <div class="status-row">
-        <span class="label">电机转速</span>
-        <span class="value">{{ fmtMotorSpeed(props.status.motor_speed) }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">触发周期</span>
-        <span class="value">{{ fmt(props.status.trg_cycle, 1) }} Hz</span>
-      </div>
-      <div class="status-row">
-        <span class="label">PPS周期</span>
-        <span class="value">{{ fmt(props.status.pps_cycle, 1) }} Hz</span>
-      </div>
-      <div class="status-row">
-        <span class="label">触发模式</span>
-        <span class="value">{{ trgModeLabel(props.status.trg_mode) }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">激光频率</span>
-        <span class="value">{{ props.status.laser_freq || 0 }} Hz</span>
+      <div class="row-list">
+        <div class="status-row">
+          <span class="label">触发模式</span>
+          <span class="value">{{ trgModeLabel(props.status.trg_mode) }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">激光频率</span>
+          <span class="value mono">{{ props.status.laser_freq || 0 }} Hz</span>
+        </div>
       </div>
     </section>
 
     <!-- ADC 通道 -->
     <section class="status-group">
       <h4>ADC 通道</h4>
-      <div v-for="(label, i) in adcChannelLabels" :key="i" class="adc-row">
-        <span class="adc-label">{{ label }}</span>
-        <div class="adc-bar-wrap">
-          <div class="adc-bar" :style="{ width: adcRatio(i) * 100 + '%' }"></div>
+      <div class="adc-list">
+        <div v-for="(label, i) in adcChannelLabels" :key="i" class="adc-row">
+          <span class="adc-label">{{ label }}</span>
+          <div class="adc-bar-wrap">
+            <div class="adc-bar" :style="{ width: adcRatio(i) * 100 + '%' }"></div>
+          </div>
+          <span class="adc-val" :title="adcTitle(i)">{{ adcText(i) }}</span>
         </div>
-        <span class="adc-val" :title="adcTitle(i)">{{ adcText(i) }}</span>
       </div>
     </section>
 
     <!-- 采集参数 -->
     <section class="status-group">
       <h4>采集参数</h4>
-      <div class="status-row">
-        <span class="label">采集状态</span>
-        <span :class="statusLabel(props.status.preview_enable).cls">
-          {{ statusLabel(props.status.preview_enable).text }}
-        </span>
-      </div>
-      <div class="status-row">
-        <span class="label">抽样率</span>
-        <span class="value">{{ props.status.preview_coe || 0 }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">采集长度</span>
-        <span class="value">{{ props.status.wave_len || 0 }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">第一段</span>
-        <span class="value">pos={{ props.status.first_pos }} len={{ props.status.first_len }}</span>
-      </div>
-      <div class="status-row">
-        <span class="label">第二段</span>
-        <span class="value">pos={{ props.status.second_pos }} len={{ props.status.second_len }}</span>
+      <div class="row-list">
+        <div class="status-row">
+          <span class="label">采集状态</span>
+          <span class="badge" :class="statusLabel(props.status.preview_enable).cls">
+            {{ statusLabel(props.status.preview_enable).text }}
+          </span>
+        </div>
+        <div class="status-row">
+          <span class="label">抽样率</span>
+          <span class="value mono">{{ props.status.preview_coe || 0 }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">采集长度</span>
+          <span class="value mono">{{ props.status.wave_len || 0 }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">第一段</span>
+          <span class="value mono">pos {{ props.status.first_pos }} · len {{ props.status.first_len }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">第二段</span>
+          <span class="value mono">pos {{ props.status.second_pos }} · len {{ props.status.second_len }}</span>
+        </div>
       </div>
     </section>
 
     <!-- 存储状态 -->
     <section class="status-group">
       <h4>存储状态</h4>
-      <div class="status-row">
-        <span class="label">存储状态</span>
-        <span :class="statusLabel(props.status.ssd_store_enable).cls">
-          {{ statusLabel(props.status.ssd_store_enable).text }}
-        </span>
-      </div>
-      <div class="status-row">
-        <span class="label">SATA连接</span>
-        <span :class="statusLabel(props.status.sata_dev_identify_done).cls">
-          {{ props.status.sata_dev_identify_done === 1 ? "已连接" : "未连接" }}
-        </span>
-      </div>
-      <div class="status-row">
-        <span class="label">硬盘容量</span>
-        <span class="value">{{ formatDiskSize(props.status.sata_dev_tot_sec_num) }}</span>
+      <div class="row-list">
+        <div class="status-row">
+          <span class="label">存储状态</span>
+          <span class="badge" :class="statusLabel(props.status.ssd_store_enable).cls">
+            {{ statusLabel(props.status.ssd_store_enable).text }}
+          </span>
+        </div>
+        <div class="status-row">
+          <span class="label">SATA 连接</span>
+          <span class="badge" :class="props.status.sata_dev_identify_done === 1 ? 'status-on' : 'status-off'">
+            {{ props.status.sata_dev_identify_done === 1 ? "已连接" : "未连接" }}
+          </span>
+        </div>
+        <div class="status-row">
+          <span class="label">硬盘容量</span>
+          <span class="value mono">{{ formatDiskSize(props.status.sata_dev_tot_sec_num) }}</span>
+        </div>
       </div>
     </section>
 
@@ -272,151 +286,339 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
     <section class="status-group" v-if="sys0Flags && sys0Flags.length > 0">
       <h4>FIFO 状态</h4>
       <div v-for="flag in sys0Flags" :key="flag" class="fifo-warn">
-        ⚠ {{ flag }}
+        <span class="fifo-dot"></span>{{ flag }}
       </div>
     </section>
 
     <!-- GPS -->
     <section class="status-group">
       <h4>GPS 数据</h4>
-      <div class="status-row">
-        <span class="label">经度</span>
-        <span class="value">{{ props.status.gps_longitude.toFixed(6) }}°</span>
+      <div class="row-list">
+        <div class="status-row">
+          <span class="label">经度</span>
+          <span class="value mono">{{ props.status.gps_longitude.toFixed(6) }}°</span>
+        </div>
+        <div class="status-row">
+          <span class="label">纬度</span>
+          <span class="value mono">{{ props.status.gps_latitude.toFixed(6) }}°</span>
+        </div>
+        <div class="status-row">
+          <span class="label">高度</span>
+          <span class="value mono">{{ props.status.gps_altitude.toFixed(2) }} m</span>
+        </div>
       </div>
-      <div class="status-row">
-        <span class="label">纬度</span>
-        <span class="value">{{ props.status.gps_latitude.toFixed(6) }}°</span>
-      </div>
-      <div class="status-row">
-        <span class="label">高度</span>
-        <span class="value">{{ props.status.gps_altitude.toFixed(2) }} m</span>
-      </div>
-      <div class="status-row">
-        <span class="label">方位角</span>
-        <span class="value">{{ fmt(props.status.gps_azimuth, 2) }}°</span>
-      </div>
-      <div class="status-row">
-        <span class="label">俯仰角</span>
-        <span class="value">{{ fmt(props.status.gps_pitch, 2) }}°</span>
-      </div>
-      <div class="status-row">
-        <span class="label">横滚角</span>
-        <span class="value">{{ fmt(props.status.gps_roll, 2) }}°</span>
+      <div class="attitude-grid">
+        <div class="attitude">
+          <span class="metric-label">方位角</span>
+          <span class="attitude-value">{{ fmt(props.status.gps_azimuth, 2) }}<i>°</i></span>
+        </div>
+        <div class="attitude">
+          <span class="metric-label">俯仰角</span>
+          <span class="attitude-value">{{ fmt(props.status.gps_pitch, 2) }}<i>°</i></span>
+        </div>
+        <div class="attitude">
+          <span class="metric-label">横滚角</span>
+          <span class="attitude-value">{{ fmt(props.status.gps_roll, 2) }}<i>°</i></span>
+        </div>
       </div>
     </section>
   </div>
+
   <div v-else class="status-empty">
-    <p>等待设备连接...</p>
+    <div class="empty-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+        stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="16" rx="3" />
+        <path d="M3 10h18M8 15h3" />
+        <circle cx="16.5" cy="15" r="1.5" />
+      </svg>
+    </div>
+    <p class="empty-title">等待设备连接</p>
+    <p class="empty-hint">搜索并连接采集卡后，此处显示实时状态</p>
   </div>
 </template>
 
 <style scoped>
 .status-panel {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .status-group {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+}
+
+.status-group:last-child {
+  margin-bottom: 4px;
 }
 
 .status-group h4 {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-tertiary);
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  letter-spacing: 1.2px;
-  margin-bottom: 6px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 8px;
+}
+
+.status-group h4::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+.row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .status-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 2px 0;
-  gap: 8px;
+  gap: 10px;
+  padding: 5px 7px;
+  margin: 0 -7px;
+  border-radius: var(--radius-xs);
+  transition: background 0.14s ease;
+}
+
+.status-row:hover {
+  background: var(--bg-inset);
 }
 
 .label {
   color: var(--text-secondary);
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 .value {
   color: var(--text-primary);
   text-align: right;
   word-break: break-all;
+  font-size: 12.5px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
 .mono {
-  font-family: "Cascadia Code", "Fira Code", monospace;
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
-/* ADC bar */
+/* 指标磁贴 */
+.metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.metric-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.metric-value {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.metric-value i {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  margin-left: 3px;
+}
+
+/* ADC */
+.adc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
 .adc-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 1px 0;
+  gap: 8px;
 }
+
 .adc-label {
   color: var(--text-secondary);
-  font-size: 12px;
-  width: 78px;
+  font-size: 11.5px;
+  width: 74px;
   flex-shrink: 0;
-  text-align: right;
 }
+
 .adc-bar-wrap {
   flex: 1;
   height: 6px;
-  background: var(--bg-primary);
-  border-radius: 3px;
+  background: #eef1f6;
+  border-radius: 999px;
   overflow: hidden;
+  min-width: 0;
 }
+
 .adc-bar {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
-  border-radius: 3px;
-  transition: width 0.2s ease-out;
+  background: linear-gradient(90deg, #6ea0ff, var(--accent));
+  border-radius: 999px;
+  transition: width 0.24s ease-out;
 }
+
 .adc-val {
   color: var(--text-primary);
-  font-size: 12px;
-  width: 74px;
+  font-size: 11.5px;
+  width: 80px;
   text-align: right;
-  font-family: "Cascadia Code", "Fira Code", monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* 状态徽章 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1.7;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.status-on {
+  background: var(--success-soft);
+  color: #0e6b3c;
+}
+
+.status-off {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+}
+
+/* 姿态角 */
+.attitude-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.attitude {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  padding: 7px 4px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.attitude-value {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
 
-/* Status indicators */
-.status-on {
-  color: var(--success);
-  font-weight: 600;
-}
-.status-off {
-  color: var(--text-secondary);
-  opacity: 0.7;
+.attitude-value i {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-left: 1px;
 }
 
-/* FIFO warnings */
+/* FIFO 告警 */
 .fifo-warn {
-  color: var(--error);
-  font-size: 13px;
-  padding: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  margin-bottom: 6px;
+  background: var(--error-soft);
+  border: 1px solid #f7d4d4;
+  border-radius: var(--radius-sm);
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 500;
 }
 
-/* Empty state */
+.fifo-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e5484d;
+  flex-shrink: 0;
+}
+
+/* 空状态 */
 .status-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.empty-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 200px;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 4px;
+  border-radius: 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+}
+
+.empty-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.empty-title {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-secondary);
-  font-size: 14px;
-  opacity: 0.6;
+}
+
+.empty-hint {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  max-width: 260px;
+  line-height: 1.6;
 }
 </style>

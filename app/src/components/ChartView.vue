@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, shallowRef, watch } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { useChart } from "../composables/useChart";
 
 const props = withDefaults(
@@ -12,7 +12,7 @@ const props = withDefaults(
   {
     channelCount: 4,
     maxPoints: 4000,
-    lineColors: () => ["#2563eb", "#dc2626", "#ca8a04", "#16a34a"],
+    lineColors: () => ["#2f6fed", "#ef4444", "#f59e0b", "#10b981"],
     channelVisible: () => [true, true, true, true],
   }
 );
@@ -22,8 +22,11 @@ const emit = defineEmits<{
 }>();
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
-const offscreenRef = shallowRef<HTMLCanvasElement | null>(null);
 const containerRef = ref<HTMLDivElement | null>(null);
+// 是否有数据（无数据时显示占位提示）
+const chartHasData = ref(false);
+// 当前画布尺寸（CSS 像素），绘制时统一使用 CSS 像素 + dpr 变换
+const viewSize = { width: 0, height: 0 };
 
 // 缩放状态
 const zoomFactor = ref(1.0);
@@ -47,25 +50,38 @@ let lastYMin = NaN;
 let lastYMax = NaN;
 let lastWidth = 0;
 
-const gridColor = "rgba(120, 130, 150, 0.25)";
-const textColor = "#667085";
-const axisColor = "rgba(90, 100, 120, 0.55)";
+const gridColor = "rgba(16, 24, 40, 0.055)";
+const textColor = "#8b97aa";
+const axisColor = "rgba(16, 24, 40, 0.14)";
 const canvasBg = "#ffffff";
-const hiddenColor = "rgba(140, 145, 160, 0.45)";
-const fontSize = 12;
+const hiddenColor = "rgba(147, 160, 180, 0.55)";
+const fontSize = 11;
+
+/** 图表绘图区边距（顶部留出图例空间） */
+const chartMargin = { top: 30, right: 18, bottom: 26, left: 56 };
+
+/** 十六进制颜色 → rgba（用于图例胶囊底色） */
+function withAlpha(color: string, alpha: number): string {
+  const hex = color.replace("#", "");
+  if (!/^[0-9a-f]{3}$|^[0-9a-f]{6}$/i.test(hex)) return color;
+  const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+  const n = parseInt(full, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
 
 // 鼠标悬停坐标（canvas 像素坐标，-1 表示不在图表区域）
 let hoverX = -1;
 let hoverY = -1;
 // 最近一次 render 的绘图区域参数（供 overlay 使用）
 let lastRenderState = {
-  margin: { top: 8, right: 12, bottom: 20, left: 50 },
+  margin: chartMargin,
   plotW: 0, plotH: 0,
   startIdx: 0, visibleLen: 0,
   yMin: 0, yMax: 0,
   xOffset: 0,
   buffers: [] as Float64Array[],
 };
+
 
 // 位置对齐模式：显示整帧数据，缓冲区索引 = 绝对采样位置（从 0 开始）
 const frameMode = ref(false);
@@ -129,7 +145,6 @@ function onMouseUp(e: MouseEvent) {
   const canvas = canvasRef.value;
   if (!canvas) return;
 
-  const dpr = window.devicePixelRatio || 1;
   const x0 = dragStartX;
   const y0 = dragStartY;
   const x1 = dragCurrentX;
@@ -247,14 +262,18 @@ function toggleCh(ch: number) {
   chart.markDirty();
 }
 
-/** 离屏渲染回调 */
-function render(buffers: Float64Array[], width: number, height: number) {
-  const offscreen = offscreenRef.value;
-  if (!offscreen) return;
-  const ctx = offscreen.getContext("2d");
+/** 渲染回调（直接绘制到可见画布） */
+function render(buffers: Float64Array[]) {
+  const canvas = canvasRef.value;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  const margin = { top: 8, right: 12, bottom: 20, left: 50 };
+  const width = viewSize.width;
+  const height = viewSize.height;
+  if (width <= 0 || height <= 0) return;
+
+  const margin = chartMargin;
   const plotW = width - margin.left - margin.right;
   const plotH = height - margin.top - margin.bottom;
 
@@ -272,8 +291,12 @@ function render(buffers: Float64Array[], width: number, height: number) {
     visibleLen = Math.max(1, frameAxisEnd.value + 1);
   } else {
     startIdx = Math.max(0, totalPoints - Math.round(visiblePoints.value));
-    visibleLen = Math.min(Math.round(visiblePoints.value), totalPoints);
+    visibleLen = Math.max(1, Math.min(Math.round(visiblePoints.value), totalPoints));
   }
+
+  // 无数据时显示占位提示（数据驱动，避免每帧刷新 DOM）
+  const hasData = totalPoints > 0;
+  if (hasData !== chartHasData.value) chartHasData.value = hasData;
 
   // 计算 Y 轴范围
   let yMin: number, yMax: number;
@@ -294,7 +317,16 @@ function render(buffers: Float64Array[], width: number, height: number) {
         if (v > yMax) yMax = v;
       }
     }
-    if (yMin === Infinity) { yMin = 0; yMax = 4096; }
+    if (yMin === Infinity) {
+      // 无数据：使用干净的默认量程，不做留白
+      yMin = 0;
+      yMax = 4096;
+    } else {
+      // 上下留 6% 余量，避免波形紧贴边框
+      const rawRange = (yMax - yMin) || 1;
+      yMin -= rawRange * 0.06;
+      yMax += rawRange * 0.06;
+    }
     const range = (yMax - yMin) || 1;
     const center = (yMin + yMax) / 2;
     yMin = center - (range / 2) * zoomFactor.value;
@@ -314,9 +346,9 @@ function render(buffers: Float64Array[], width: number, height: number) {
   // X 轴刻度以 height-2 为顶部向下绘制、跑到画布外而不可见
   ctx.textBaseline = "alphabetic";
 
-  // 绘图区域边框（轴线用更亮的颜色）
+  // 绘图区域边框
   ctx.strokeStyle = axisColor;
-  ctx.lineWidth = 1.2;
+  ctx.lineWidth = 1;
   ctx.strokeRect(margin.left, margin.top, plotW, plotH);
 
   if (showGrid.value) {
@@ -324,9 +356,9 @@ function render(buffers: Float64Array[], width: number, height: number) {
     const gridLines = 5;
     ctx.strokeStyle = gridColor;
     ctx.fillStyle = textColor;
-    ctx.font = `${fontSize}px monospace`;
+    ctx.font = `${fontSize}px ui-monospace, "Cascadia Code", monospace`;
     ctx.textAlign = "right";
-    ctx.lineWidth = 0.5;
+    ctx.lineWidth = 1;
 
     for (let i = 0; i <= gridLines; i++) {
       const y = margin.top + (plotH / gridLines) * i;
@@ -338,7 +370,7 @@ function render(buffers: Float64Array[], width: number, height: number) {
       ctx.stroke();
 
       const label = val >= 1000 ? (val / 1000).toFixed(1) + "k" : val.toFixed(0);
-      ctx.fillText(label, margin.left - 4, y + 3);
+      ctx.fillText(label, margin.left - 8, y + 3.5);
     }
 
     // 垂直网格线
@@ -352,18 +384,18 @@ function render(buffers: Float64Array[], width: number, height: number) {
       ctx.stroke();
 
       const idx = Math.round(startIdx + ((visibleLen - 1) / xLabels) * i);
-      ctx.fillText(String(idx + xOffset), x, height - 2);
+      if (totalPoints > 0) ctx.fillText(String(idx + xOffset), x, height - 8);
     }
   } else {
     // 仅 X 轴标签（无网格线）
     ctx.fillStyle = textColor;
-    ctx.font = `${fontSize}px monospace`;
+    ctx.font = `${fontSize}px ui-monospace, "Cascadia Code", monospace`;
     ctx.textAlign = "center";
     const xLabels = 4;
     for (let i = 0; i <= xLabels; i++) {
       const x = margin.left + (plotW / xLabels) * i;
       const idx = Math.round(startIdx + ((visibleLen - 1) / xLabels) * i);
-      ctx.fillText(String(idx + xOffset), x, height - 2);
+      if (totalPoints > 0) ctx.fillText(String(idx + xOffset), x, height - 8);
     }
   }
 
@@ -384,7 +416,9 @@ function render(buffers: Float64Array[], width: number, height: number) {
     const color = props.lineColors[ch] || "#ffffff";
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1.4;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
 
     ctx.beginPath();
 
@@ -414,32 +448,53 @@ function render(buffers: Float64Array[], width: number, height: number) {
 
   ctx.restore();
 
-  // 通道图例
+  // 通道图例（胶囊样式，位于绘图区上方的留白内）
   ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const legendY = 15;
+  let legendX = margin.left;
   for (let ch = 0; ch < Math.min(buffers.length, 4); ch++) {
-    const x = margin.left + 4 + ch * 80;
-    const y = margin.top - 2;
-    ctx.fillStyle = props.channelVisible[ch] ? props.lineColors[ch] : hiddenColor;
-    ctx.fillRect(x, y, 10, 2);
-    ctx.fillStyle = props.channelVisible[ch] ? textColor : hiddenColor;
-    ctx.font = `${fontSize - 1}px sans-serif`;
-    ctx.fillText(props.channelVisible[ch] ? `CH${ch}` : `CH${ch}(隐藏)`, x + 13, y + 3);
+    const visible = props.channelVisible[ch];
+    const color = visible ? props.lineColors[ch] || "#2f6fed" : hiddenColor;
+    const label = `CH${ch}`;
+    ctx.font = `600 ${fontSize}px "Inter", "PingFang SC", sans-serif`;
+    const boxW = ctx.measureText(label).width + 30;
+    const boxH = 21;
+
+    // 胶囊底色
+    ctx.fillStyle = visible ? withAlpha(props.lineColors[ch] || "#2f6fed", 0.09) : "rgba(147, 160, 180, 0.07)";
+    ctx.beginPath();
+    ctx.roundRect(legendX, legendY - boxH / 2, boxW, boxH, 6);
+    ctx.fill();
+
+    // 色块
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(legendX + 8, legendY - 1.5, 11, 3, 1.5);
+    ctx.fill();
+
+    // 文字
+    ctx.fillStyle = visible ? "#4a5568" : "#a3adbd";
+    ctx.fillText(label, legendX + 23, legendY + 0.5);
+
+    legendX += boxW + 6;
   }
+  ctx.textBaseline = "alphabetic";
 
   // 保存渲染参数供 overlay 使用
   lastRenderState = { margin, plotW, plotH, startIdx, visibleLen, yMin, yMax, xOffset, buffers };
 
   // ---- 鼠标悬停十字光标 + 坐标提示 ----
-  const dpr = window.devicePixelRatio || 1;
-  const mx = hoverX * dpr;
-  const my = hoverY * dpr;
+  // 画布绘制坐标统一为 CSS 像素（resize 时已用 transform 处理 dpr）
+  const mx = hoverX;
+  const my = hoverY;
 
   // 框选矩形（在光标之前绘制，避免遮挡）
   if (isDragging && dragStartX >= 0 && dragCurrentX >= 0) {
-    const sx = Math.min(dragStartX, dragCurrentX) * dpr;
-    const sy = Math.min(dragStartY, dragCurrentY) * dpr;
-    const sw = Math.abs(dragCurrentX - dragStartX) * dpr;
-    const sh = Math.abs(dragCurrentY - dragStartY) * dpr;
+    const sx = Math.min(dragStartX, dragCurrentX);
+    const sy = Math.min(dragStartY, dragCurrentY);
+    const sw = Math.abs(dragCurrentX - dragStartX);
+    const sh = Math.abs(dragCurrentY - dragStartY);
 
     ctx.fillStyle = "rgba(37, 99, 235, 0.10)";
     ctx.fillRect(sx, sy, sw, sh);
@@ -462,8 +517,8 @@ function render(buffers: Float64Array[], width: number, height: number) {
     // 十字光标
     ctx.save();
     ctx.setLineDash([4, 3]);
-    ctx.strokeStyle = "rgba(60, 70, 90, 0.35)";
-    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = "rgba(37, 99, 235, 0.32)";
+    ctx.lineWidth = 1;
     // 竖线
     ctx.beginPath();
     ctx.moveTo(mx, margin.top);
@@ -510,26 +565,34 @@ function render(buffers: Float64Array[], width: number, height: number) {
 
     // 绘制坐标提示框
     if (tipLines.length > 0) {
-      ctx.font = `${fontSize + 1}px monospace`;
-      const padding = 5;
-      const lineH = fontSize + 3;
+      ctx.font = `${fontSize + 1}px ui-monospace, "Cascadia Code", monospace`;
+      const padding = 8;
+      const lineH = fontSize + 6;
       const boxW = Math.max(...tipLines.map(l => ctx.measureText(l).width)) + padding * 2;
-      const boxH = tipLines.length * lineH + padding * 2;
+      const boxH = tipLines.length * lineH + padding * 2 - 4;
 
       // 计算位置（避免超出图表边界）
-      let bx = mx + 10;
+      let bx = mx + 14;
       let by = my - boxH / 2;
-      if (bx + boxW > margin.left + plotW) bx = mx - boxW - 10;
+      if (bx + boxW > margin.left + plotW) bx = mx - boxW - 14;
       if (by < margin.top) by = margin.top;
       if (by + boxH > margin.top + plotH) by = margin.top + plotH - boxH;
 
-      // 背景
-      ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-      ctx.strokeStyle = "rgba(120, 130, 150, 0.45)";
-      ctx.lineWidth = 0.8;
+      // 背景 + 阴影
+      ctx.save();
+      ctx.shadowColor = "rgba(16, 24, 40, 0.14)";
+      ctx.shadowBlur = 14;
+      ctx.shadowOffsetY = 4;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
       ctx.beginPath();
-      ctx.roundRect(bx, by, boxW, boxH, 3);
+      ctx.roundRect(bx, by, boxW, boxH, 7);
       ctx.fill();
+      ctx.restore();
+
+      ctx.strokeStyle = "rgba(16, 24, 40, 0.1)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, boxW, boxH, 7);
       ctx.stroke();
 
       // 文字
@@ -545,8 +608,7 @@ function render(buffers: Float64Array[], width: number, height: number) {
 
 function resize() {
   const canvas = canvasRef.value;
-  const offscreen = offscreenRef.value;
-  if (!canvas || !offscreen) return;
+  if (!canvas) return;
 
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
@@ -554,15 +616,15 @@ function resize() {
   const h = rect.height;
   if (w === 0 || h === 0) return;
 
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  offscreen.width = w * dpr;
-  offscreen.height = h * dpr;
+  viewSize.width = w;
+  viewSize.height = h;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
 
   const ctx = canvas.getContext("2d");
   if (ctx) {
-    ctx.imageSmoothingEnabled = false;
-    ctx.scale(dpr, dpr);
+    // 统一用 CSS 像素绘制，由 transform 负责 HiDPI 缩放
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 }
 
@@ -573,11 +635,10 @@ const chart = useChart({
 });
 
 onMounted(() => {
-  offscreenRef.value = document.createElement("canvas");
   const canvas = canvasRef.value;
   if (!canvas) return;
   resize();
-  chart.renderLoop(canvas, offscreenRef.value);
+  chart.renderLoop();
 });
 
 onUnmounted(() => chart.stop());
@@ -622,44 +683,77 @@ onUnmounted(() => {
 
 <template>
   <div ref="containerRef" class="chart-container">
-    <canvas ref="canvasRef"></canvas>
+    <div class="canvas-wrap">
+      <canvas ref="canvasRef"></canvas>
+      <div v-if="!chartHasData" class="chart-empty">
+        <div class="chart-empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 17l4.5-5.5 3.5 3L15 8l6 6" />
+            <path d="M3 4v16h18" />
+          </svg>
+        </div>
+        <p class="chart-empty-title">等待采集数据</p>
+        <p class="chart-empty-desc">连接设备并开始采集后，实时波形将在此显示</p>
+      </div>
+    </div>
     <div class="channel-bar">
       <!-- 通道可见性 -->
-      <label v-for="ch in props.channelCount" :key="ch" class="ch-cb"
-        :style="{ '--ch-color': props.lineColors[ch-1] }">
-        <input type="checkbox" :checked="props.channelVisible[ch-1]" @change="toggleCh(ch-1)" />
-        <span>CH{{ ch-1 }}</span>
-      </label>
-      <span class="sep"></span>
+      <div class="bar-group">
+        <label
+          v-for="ch in props.channelCount"
+          :key="ch"
+          class="ch-chip"
+          :class="{ off: !props.channelVisible[ch - 1] }"
+          :style="{ '--ch-color': props.lineColors[ch - 1] }"
+        >
+          <input type="checkbox" :checked="props.channelVisible[ch - 1]" @change="toggleCh(ch - 1)" />
+          <span class="ch-swatch"></span>
+          <span>CH{{ ch - 1 }}</span>
+        </label>
+      </div>
+
+      <span class="bar-divider"></span>
+
       <!-- 坐标范围 X -->
-      <span class="bar-label">X:</span>
-      <input type="number" v-model.number="xStartManual" class="range-inp" title="X 起始采样位置" />
-      <span class="bar-label">~</span>
-      <input type="number" v-model.number="xEndManual" class="range-inp" title="X 结束采样位置" />
-      <span class="sep"></span>
+      <div class="bar-group">
+        <span class="bar-label">X</span>
+        <input type="number" v-model.number="xStartManual" class="range-inp" title="X 起始采样位置" />
+        <span class="bar-tilde">~</span>
+        <input type="number" v-model.number="xEndManual" class="range-inp" title="X 结束采样位置" />
+      </div>
+
+      <span class="bar-divider"></span>
+
       <!-- 坐标范围 Y -->
-      <span class="bar-label">Y:</span>
-      <input type="number" v-model.number="yMinManual" class="range-inp" title="Y 最小值" />
-      <span class="bar-label">~</span>
-      <input type="number" v-model.number="yMaxManual" class="range-inp" title="Y 最大值" />
-      <span class="sep"></span>
-      <button class="bar-btn" @click="applyRange">设定</button>
-      <button class="bar-btn" @click="resetAutoRange">自动</button>
-      <span class="sep"></span>
+      <div class="bar-group">
+        <span class="bar-label">Y</span>
+        <input type="number" v-model.number="yMinManual" class="range-inp" title="Y 最小值" />
+        <span class="bar-tilde">~</span>
+        <input type="number" v-model.number="yMaxManual" class="range-inp" title="Y 最大值" />
+        <button class="bar-btn" @click="applyRange">设定</button>
+        <button class="bar-btn" @click="resetAutoRange">自动</button>
+      </div>
+
+      <span class="bar-divider"></span>
+
       <!-- 显示选项 -->
-      <label class="ch-cb">
-        <input type="checkbox" v-model="showGrid" @change="chart.markDirty()" />
-        <span>栅格</span>
-      </label>
-      <label class="ch-cb">
-        <input type="checkbox" v-model="showDots" @change="chart.markDirty()" />
-        <span>圆点</span>
-      </label>
-      <label class="ch-cb">
-        <input type="checkbox" v-model="autoRefresh" @change="onRefreshToggle" />
-        <span :style="{ color: autoRefresh ? undefined : 'var(--warning)' }">{{ autoRefresh ? '实时' : '暂停' }}</span>
-      </label>
-      <span class="zoom-hint">滚轮X轴缩放 · Ctrl+滚轮Y轴缩放 · 框选放大 · 双击重置</span>
+      <div class="bar-group">
+        <label class="ch-chip plain">
+          <input type="checkbox" v-model="showGrid" @change="chart.markDirty()" />
+          <span>栅格</span>
+        </label>
+        <label class="ch-chip plain">
+          <input type="checkbox" v-model="showDots" @change="chart.markDirty()" />
+          <span>圆点</span>
+        </label>
+        <label class="ch-chip plain" :class="{ paused: !autoRefresh }">
+          <input type="checkbox" v-model="autoRefresh" @change="onRefreshToggle" />
+          <span>{{ autoRefresh ? '实时' : '暂停' }}</span>
+        </label>
+      </div>
+
+      <span class="zoom-hint">滚轮缩放 X · Ctrl+滚轮缩放 Y · 框选放大 · 双击重置</span>
     </div>
   </div>
 </template>
@@ -672,76 +766,214 @@ onUnmounted(() => {
   position: relative;
   display: flex;
   flex-direction: column;
+  background: #fff;
+}
+
+.canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
 canvas {
   flex: 1;
   display: block;
   min-height: 0;
+  min-width: 0;
   cursor: crosshair;
 }
 
-.zoom-hint {
-  font-size: 12px;
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  pointer-events: none;
+  text-align: center;
+  padding: 20px;
+}
+
+.chart-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 6px;
+  border-radius: 13px;
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+}
+
+.chart-empty-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.chart-empty-title {
+  font-size: 13.5px;
+  font-weight: 600;
   color: var(--text-secondary);
-  opacity: 0.65;
+}
+
+.chart-empty-desc {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.zoom-hint {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
   white-space: nowrap;
-  padding: 2px 6px;
+  padding: 0 4px;
 }
 
 .channel-bar {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 14px;
-  background: var(--bg-secondary);
+  gap: 8px;
+  padding: 7px 12px;
+  background: #fbfcfe;
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
   flex-wrap: wrap;
+  row-gap: 6px;
 }
-.sep {
-  width: 1px;
-  height: 18px;
-  background: var(--border-color);
-  margin: 0 6px;
-}
-.bar-label {
-  font-size: 14px;
-  color: var(--text-secondary);
-}
-.range-inp {
-  width: 68px;
-  font-size: 14px;
-  padding: 2px 6px;
-  height: 22px;
-}
-.bar-btn {
-  font-size: 14px;
-  padding: 3px 10px;
-  height: 22px;
-  line-height: 1;
-}
-.ch-cb {
+
+.bar-group {
   display: flex;
   align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  padding: 2px 8px;
-  border-radius: 3px;
+  gap: 5px;
+}
+
+.bar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-color);
+  flex-shrink: 0;
+}
+
+.bar-label {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text-tertiary);
+  letter-spacing: 0.06em;
+}
+
+.bar-tilde {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.range-inp {
+  width: 62px;
+  height: 26px;
+  padding: 0 7px;
+  font-size: 11.5px;
+  border-radius: var(--radius-xs);
+  background: #fff;
+}
+
+.range-inp:focus {
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.bar-btn {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
+  border-radius: var(--radius-xs);
+  box-shadow: none;
+  color: var(--text-secondary);
+}
+
+.bar-btn:hover {
+  color: var(--accent-dim);
+}
+
+/* 通道/选项胶囊 */
+.ch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
   border: 1px solid transparent;
-  transition: border-color 0.15s;
-}
-.ch-cb:hover {
-  border-color: var(--ch-color, var(--accent-dim));
-}
-.ch-cb input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
   cursor: pointer;
-}
-.ch-cb span {
-  color: var(--ch-color, var(--text-primary));
+  font-size: 11.5px;
   font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  transition: background 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
+  user-select: none;
+}
+
+.ch-chip:hover {
+  background: #fff;
+  border-color: var(--border-color);
+}
+
+.ch-chip input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+}
+
+.ch-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--ch-color, var(--accent));
+  flex-shrink: 0;
+}
+
+.ch-chip.plain {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.ch-chip.off {
+  opacity: 0.55;
+}
+
+.ch-chip.off .ch-swatch {
+  background: var(--text-tertiary);
+}
+
+.ch-chip.paused {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-color: #f2dec2;
+}
+
+/* 窄窗口：压缩工具条，隐藏操作提示 */
+@media (max-width: 1200px) {
+  .channel-bar {
+    gap: 6px;
+    padding: 6px 8px;
+  }
+
+  .zoom-hint {
+    display: none;
+  }
+
+  .range-inp {
+    width: 52px;
+    padding: 0 6px;
+  }
+
+  .bar-btn {
+    padding: 0 7px;
+  }
+
+  .ch-chip {
+    gap: 4px;
+    padding: 0 6px;
+  }
 }
 </style>

@@ -1,5 +1,6 @@
 use commands::NetworkState;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::Emitter;
 use tauri::Manager;
 use tokio::sync::{broadcast, Mutex};
@@ -10,6 +11,12 @@ mod network;
 mod preview;
 mod protocol;
 mod status;
+
+/// 预览数据推送到前端的最大频率（30Hz）。
+/// Tauri v2 的事件通过 eval 注入 JS，每帧都要序列化 + 编译执行，
+/// 波形帧数据量大，按设备原始上传频率（可达 100Hz）推送会占满 WebKit 主线程，
+/// 导致按钮点击等交互明显变慢；画面只需保留最新一帧，因此这里限制推送频率。
+const PREVIEW_EMIT_INTERVAL: Duration = Duration::from_millis(33);
 
 /// 后台 UDP 监听任务：唯一 socket 消费者，将所有帧分发到 broadcast channel
 async fn background_udp_listener(
@@ -28,6 +35,8 @@ async fn background_udp_listener(
         drop(guard);
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     };
+
+    let mut last_preview_emit: Option<Instant> = None;
 
     loop {
         match network.recv_from().await {
@@ -62,12 +71,19 @@ async fn background_udp_listener(
                     }
                 } else if frame.cmd == 0x0300 {
                     if from_connected {
-                        match preview::PreviewFrame::parse(&frame.data) {
-                            Ok(preview_frame) => {
-                                let _ = app.emit("preview-data", preview_frame);
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to parse preview data: {}", e);
+                        // 限频：只解析并推送最新一帧，丢弃间隔内的旧帧
+                        let due = last_preview_emit
+                            .map(|t| t.elapsed() >= PREVIEW_EMIT_INTERVAL)
+                            .unwrap_or(true);
+                        if due {
+                            last_preview_emit = Some(Instant::now());
+                            match preview::PreviewFrame::parse(&frame.data) {
+                                Ok(preview_frame) => {
+                                    let _ = app.emit("preview-data", preview_frame);
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to parse preview data: {}", e);
+                                }
                             }
                         }
                     } else {

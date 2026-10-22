@@ -7,8 +7,8 @@ export interface ChartOptions {
     maxPoints: number;
     /** 通道数 */
     channels: number;
-    /** 渲染回调 */
-    onRender: (buffers: Float64Array[], width: number, height: number) => void;
+    /** 渲染回调（尺寸由绘制方自行维护，避免每帧复制整块画布） */
+    onRender: (buffers: Float64Array[]) => void;
 }
 
 export function useChart(options: ChartOptions) {
@@ -43,7 +43,10 @@ export function useChart(options: ChartOptions) {
         }
         writeIdx = (writeIdx + 1) % maxPoints;
         if (count < maxPoints) count++;
-        if (!paused) dirty = true;
+        if (!paused) {
+            dirty = true;
+            schedule();
+        }
     }
 
     /**
@@ -63,7 +66,10 @@ export function useChart(options: ChartOptions) {
         }
         count = len;
         writeIdx = 0;
-        if (!paused) dirty = true;
+        if (!paused) {
+            dirty = true;
+            schedule();
+        }
     }
 
     /** 获取按时间顺序排列的指定通道数据（从旧到新） */
@@ -91,6 +97,7 @@ export function useChart(options: ChartOptions) {
         count = 0;
         frameMode = false;
         dirty = true;
+        schedule();
     }
 
     /** 设置通道数 */
@@ -102,45 +109,42 @@ export function useChart(options: ChartOptions) {
         clear();
     }
 
-    /** 渲染循环 */
-    function renderLoop(canvas: HTMLCanvasElement, offscreen: HTMLCanvasElement) {
-        const ctx = canvas.getContext("2d")!;
-        const offCtx = offscreen.getContext("2d")!;
+    /** 渲染循环（直接绘制到可见画布；仅在需要时调度，空闲时不占 CPU） */
+    function renderLoop() {
+        schedule();
+    }
 
-        function frame() {
-            if (dirty) {
-                dirty = false;
-                overlayDirty = false;
+    /** 调度一次渲染（同一帧内多次标记只绘制一次） */
+    function schedule() {
+        if (!rafId) rafId = requestAnimationFrame(frame);
+    }
 
-                // 收集所有通道数据（暂停时使用冻结快照）
-                const allData: Float64Array[] = [];
-                for (let ch = 0; ch < channels; ch++) {
-                    allData.push(frozenData ? frozenData[ch] : getChannelData(ch));
-                }
+    function frame() {
+        rafId = 0;
 
-                // 在离屏 canvas 上渲染（包括数据和 overlay）
-                onRender(allData, offscreen.width, offscreen.height);
+        if (dirty) {
+            dirty = false;
+            overlayDirty = false;
 
-                // 复制到主 canvas
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(offscreen, 0, 0);
-            } else if (overlayDirty) {
-                overlayDirty = false;
-
-                // 暂停时仅刷新 overlay（数据不变，重新绘制光标/框选）
-                const allData: Float64Array[] = [];
-                for (let ch = 0; ch < channels; ch++) {
-                    allData.push(frozenData ? frozenData[ch] : getChannelData(ch));
-                }
-                onRender(allData, offscreen.width, offscreen.height);
-
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(offscreen, 0, 0);
+            // 收集所有通道数据（暂停时使用冻结快照）
+            const allData: Float64Array[] = [];
+            for (let ch = 0; ch < channels; ch++) {
+                allData.push(frozenData ? frozenData[ch] : getChannelData(ch));
             }
-            rafId = requestAnimationFrame(frame);
+            onRender(allData);
+        } else if (overlayDirty) {
+            overlayDirty = false;
+
+            // 暂停时仅刷新 overlay（数据不变，重新绘制光标/框选）
+            const allData: Float64Array[] = [];
+            for (let ch = 0; ch < channels; ch++) {
+                allData.push(frozenData ? frozenData[ch] : getChannelData(ch));
+            }
+            onRender(allData);
         }
 
-        rafId = requestAnimationFrame(frame);
+        // 若本帧执行期间又有新数据/overlay 变更，继续调度
+        if (dirty || overlayDirty) schedule();
     }
 
     /** 停止渲染 */
@@ -154,11 +158,13 @@ export function useChart(options: ChartOptions) {
     /** 标记脏数据，触发重绘（用于 resize 后） */
     function markDirty() {
         dirty = true;
+        schedule();
     }
 
     /** 仅标记 overlay 脏（鼠标移动等，暂停时不触发数据重绘） */
     function markOverlayDirty() {
         overlayDirty = true;
+        schedule();
     }
     let overlayDirty = false;
 
@@ -174,6 +180,7 @@ export function useChart(options: ChartOptions) {
         } else {
             frozenData = null;
             dirty = true;
+            schedule();
         }
     }
 
@@ -182,6 +189,7 @@ export function useChart(options: ChartOptions) {
     /** 手动触发一次渲染（暂停模式下使用） */
     function forceRender() {
         dirty = true;
+        schedule();
     }
 
     return {

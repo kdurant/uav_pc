@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { useDeviceDiscovery } from "../composables/useDeviceDiscovery";
 import { useSystemStatus } from "../composables/useSystemStatus";
 import { usePreviewData } from "../composables/usePreviewData";
@@ -48,14 +49,15 @@ const statusLabel = computed(() => {
   }
 });
 
-const statusColor = computed(() => {
+/** 连接状态胶囊样式 */
+const connectionClass = computed(() => {
   switch (connectionState.value) {
     case ConnectionState.Connected:
-      return "var(--success)";
+      return "is-connected";
     case ConnectionState.Searching:
-      return "var(--warning)";
+      return "is-searching";
     default:
-      return "var(--text-secondary)";
+      return "is-idle";
   }
 });
 
@@ -81,7 +83,6 @@ function handleSelectDevice(device: (typeof devices.value)[0]) {
 async function handleConnect(device: (typeof devices.value)[0]) {
   isConnecting.value = true;
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
     await invoke("query_sys_status", {
       deviceIp: device.ip,
       enable: true,
@@ -101,7 +102,6 @@ async function handleConnect(device: (typeof devices.value)[0]) {
 async function handleToggleStatus(enable: boolean) {
   if (!selectedDevice.value) return;
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
     await invoke("query_sys_status", {
       deviceIp: selectedDevice.value.ip,
       enable,
@@ -121,11 +121,10 @@ async function handleDisconnect() {
   previewOutput.stop();
   if (selectedDevice.value) {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("query_sys_status", {
-        deviceIp: selectedDevice.value.ip,
-        enable: false,
-      });
+        await invoke("query_sys_status", {
+          deviceIp: selectedDevice.value.ip,
+          enable: false,
+        });
     } catch (err) {
       console.error("Disconnect failed:", err);
     }
@@ -142,18 +141,28 @@ handleSearch();
   <div class="layout">
     <!-- Top toolbar -->
     <header class="toolbar">
-      <div class="toolbar-left">
-        <span class="app-title">无人机采集卡上位机</span>
+      <div class="brand">
+        <div class="brand-mark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 13h4l2.4-6 3.1 12 3-9 2 3H22" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="app-title">无人机采集卡上位机</span>
+          <span class="app-subtitle">UAV DATA ACQUISITION</span>
+        </div>
       </div>
-      <div class="toolbar-center">
-        <span class="connection-status" :style="{ color: statusColor }">
-          {{ statusLabel }}
-        </span>
-      </div>
+
       <div class="toolbar-right">
+        <div class="conn-pill" :class="connectionClass">
+          <span class="conn-dot"></span>
+          <span class="conn-label">{{ statusLabel }}</span>
+        </div>
         <button
           v-if="connectionState !== ConnectionState.Connected"
-          :disabled="isSearching"
+          class="accent"
+          :disabled="isSearching || isConnecting"
           @click="handleSearch"
         >
           {{ isSearching ? "搜索中..." : "搜索设备" }}
@@ -163,14 +172,18 @@ handleSearch();
 
     <!-- 设备状态中断告警：3 秒未收到状态上传 -->
     <div v-if="statusStale" class="status-alert">
-      ⚠ 设备状态数据中断：已超过 3 秒未收到设备上传
+      <span class="alert-icon">!</span>
+      <span>设备状态数据中断：已超过 3 秒未收到设备上传</span>
     </div>
 
     <!-- Main content: three columns -->
     <div class="main-content">
       <!-- Left: Control Panel -->
       <aside class="panel panel-left" :class="{ 'panel-left-wide': controlTab === 'storage' }">
-        <div class="panel-header">控制面板</div>
+        <div class="panel-header">
+          <span class="panel-title">控制面板</span>
+          <span class="panel-tag">CONTROL</span>
+        </div>
         <div class="panel-body">
           <ControlPanel
             :connected="connectionState === ConnectionState.Connected"
@@ -185,7 +198,10 @@ handleSearch();
 
       <!-- Center: Chart -->
       <main class="panel panel-center">
-        <div class="panel-header">数据预览</div>
+        <div class="panel-header">
+          <span class="panel-title">数据预览</span>
+          <span class="panel-tag">实时波形 · 4 CH</span>
+        </div>
         <div class="panel-body chart-body">
           <ChartView ref="chartRef" :channel-count="4" :max-points="4000" :channel-visible="channelVisible"
             @update:channel-visible="channelVisible = $event" />
@@ -194,7 +210,12 @@ handleSearch();
 
       <!-- Right: Status Panel -->
       <aside class="panel panel-right">
-        <div class="panel-header">设备状态</div>
+        <div class="panel-header">
+          <span class="panel-title">设备状态</span>
+          <span class="panel-tag" :class="{ live: connectionState === ConnectionState.Connected }">
+            <span class="tag-dot"></span>{{ connectionState === ConnectionState.Connected ? "实时" : "离线" }}
+          </span>
+        </div>
         <div class="panel-body">
           <StatusPanel :status="status" />
         </div>
@@ -217,122 +238,350 @@ handleSearch();
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  background: var(--bg-app);
 }
 
-/* Toolbar */
+/* ---------- 顶部工具栏 ---------- */
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 40px;
-  padding: 0 16px;
-  background: var(--bg-secondary);
+  height: 58px;
+  padding: 0 18px;
+  background: #fff;
   border-bottom: 1px solid var(--border-color);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  color: #fff;
+  background: linear-gradient(145deg, #4b86ff, #1d4ed8);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.35);
   flex-shrink: 0;
 }
-.toolbar-left,
-.toolbar-center,
+
+.brand-mark svg {
+  width: 19px;
+  height: 19px;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.app-title {
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--text-primary);
+  letter-spacing: 0.012em;
+  white-space: nowrap;
+  line-height: 1.25;
+}
+
+.app-subtitle {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  letter-spacing: 0.16em;
+  white-space: nowrap;
+}
+
 .toolbar-right {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-.toolbar-left {
-  min-width: 200px;
-}
-.toolbar-right {
-  min-width: 200px;
-  justify-content: flex-end;
-}
-.app-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--accent);
-  white-space: nowrap;
-  letter-spacing: 0.03em;
+  gap: 10px;
 }
 
-/* 设备状态中断告警 */
-.status-alert {
-  flex-shrink: 0;
-  padding: 7px 16px;
-  background: var(--error);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  text-align: center;
-  letter-spacing: 0.05em;
-  animation: alert-blink 1s ease-in-out infinite;
+/* 连接状态胶囊 */
+.conn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-inset);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  max-width: 280px;
 }
-@keyframes alert-blink {
+
+.conn-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.conn-pill.is-connected {
+  background: var(--success-soft);
+  border-color: #c8ecd7;
+  color: #0e6b3c;
+}
+
+.conn-pill.is-connected .conn-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(18, 136, 74, 0.14);
+}
+
+.conn-pill.is-searching {
+  background: var(--warning-soft);
+  border-color: #f6dfbc;
+  color: #9a5b06;
+}
+
+.conn-pill.is-searching .conn-dot {
+  background: #e08c1a;
+  animation: dot-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(224, 140, 26, 0.45);
+  }
   50% {
-    opacity: 0.4;
+    box-shadow: 0 0 0 4px rgba(224, 140, 26, 0);
   }
 }
 
-/* Main content area */
+/* ---------- 中断告警 ---------- */
+.status-alert {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin: 10px 14px 0;
+  padding: 9px 14px;
+  background: var(--error-soft);
+  border: 1px solid #f7cfcf;
+  border-radius: var(--radius);
+  color: #b42318;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  animation: alert-blink 1.8s ease-in-out infinite;
+}
+
+.alert-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #e5484d;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+@keyframes alert-blink {
+  50% {
+    opacity: 0.65;
+  }
+}
+
+/* ---------- 主内容区 ---------- */
 .main-content {
   display: flex;
   flex: 1;
   overflow: hidden;
-  gap: 1px;
-  background: var(--border-color);
+  gap: 12px;
+  padding: 12px 14px 14px;
+  min-height: 0;
 }
 
-/* Panels */
+/* 卡片式面板 */
+/* 注意：这里刻意不使用 box-shadow。WebKitGTK 在面板内部内容变化时
+   会重新栅格化整块模糊阴影，导致点击 Tab/按钮时出现数百毫秒卡顿。 */
 .panel {
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
+  border: 1px solid #dde3ec;
+  border-radius: var(--panel-radius);
   overflow: hidden;
+  min-height: 0;
 }
+
 .panel-left {
-  width: 260px;
-  min-width: 200px;
+  width: 292px;
+  min-width: 240px;
   flex-shrink: 0;
 }
-/* 存储 tab：左栏加宽以容纳 SSD 文件表格 */
+
+/* 存储 tab：左栏加宽以容纳 SSD 文件表格（不做宽度动画，避免整页重排 + 图表反复 resize） */
 .panel-left-wide {
-  width: 440px;
-  transition: width 0.15s ease;
+  width: 452px;
 }
+
 .panel-center {
   flex: 1;
-  min-width: 400px;
+  min-width: 380px;
 }
+
 .panel-right {
-  width: 340px;
-  min-width: 280px;
+  width: 356px;
+  min-width: 290px;
   flex-shrink: 0;
 }
+
 .panel-header {
-  padding: 9px 14px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px;
+  height: 42px;
+  background: #fff;
   border-bottom: 1px solid var(--border-color);
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
   flex-shrink: 0;
 }
+
+.panel-title {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+.panel-title::before {
+  content: "";
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #4b86ff, var(--accent-dim));
+}
+
+.panel-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.panel-tag.live {
+  color: var(--success);
+}
+
+.tag-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .panel-body {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 14px;
+  min-height: 0;
 }
+
 .chart-body {
   padding: 0;
   display: flex;
+  overflow: hidden;
+  background: #fff;
 }
-.chart-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+
+/* ---------- 窄窗口自适应 ---------- */
+@media (max-width: 1200px) {
+  .main-content {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .panel-left {
+    width: 272px;
+  }
+
+  .panel-right {
+    width: 326px;
+  }
+
+  .panel-left-wide {
+    width: 360px;
+  }
 }
-.placeholder {
-  color: var(--text-secondary);
-  font-size: 15px;
-  opacity: 0.6;
+
+@media (max-width: 1080px) {
+  .toolbar {
+    height: 52px;
+    padding: 0 12px;
+  }
+
+  .main-content {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .panel-left {
+    width: 258px;
+  }
+
+  .panel-right {
+    width: 306px;
+    min-width: 280px;
+  }
+
+  .panel-left-wide {
+    width: 300px;
+  }
+
+  .panel-center {
+    min-width: 300px;
+  }
+
+  .app-subtitle {
+    display: none;
+  }
+
+  .panel-header {
+    padding: 0 11px;
+    height: 38px;
+  }
+
+  .panel-body {
+    padding: 11px;
+  }
 }
 </style>

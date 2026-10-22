@@ -7,21 +7,53 @@
 }
 
 :root {
-    --bg-primary: #f2f4f7;
+    /* 背景层级 */
+    --bg-app: #f3f5f9;
+    --bg-primary: #f3f5f9;
     --bg-secondary: #ffffff;
-    --bg-tertiary: #eef1f5;
-    --bg-hover: #e3e7ee;
-    --text-primary: #1f2530;
-    --text-secondary: #667085;
+    --bg-tertiary: #f4f6fa;
+    --bg-inset: #f8fafc;
+    --bg-hover: #edf1f7;
+
+    /* 文字层级 */
+    --text-primary: #101828;
+    --text-secondary: #5b6880;
+    --text-tertiary: #93a0b4;
+
+    /* 主色 */
     --accent: #2563eb;
     --accent-dim: #1d4ed8;
-    --accent-glow: rgba(37, 99, 235, 0.15);
-    --border-color: #dfe3e8;
-    --border-light: #cbd2da;
-    --success: #16a34a;
-    --warning: #d97706;
-    --error: #dc2626;
-    --panel-radius: 6px;
+    --accent-soft: #eef3ff;
+    --accent-glow: rgba(37, 99, 235, 0.14);
+
+    /* 语义色 */
+    --success: #12884a;
+    --success-soft: #e9f8ef;
+    --warning: #b45309;
+    --warning-soft: #fff5e6;
+    --error: #c92a2a;
+    --error-soft: #fff1f1;
+
+    /* 边框 */
+    --border-color: #e5e9f0;
+    --border-light: #d8dee9;
+    --border-strong: #c3ccdb;
+
+    /* 圆角 */
+    --radius-xs: 6px;
+    --radius-sm: 8px;
+    --radius: 10px;
+    --radius-lg: 14px;
+    --panel-radius: 14px;
+
+    /* 阴影 */
+    --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.04);
+    --shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+    --shadow-md: 0 8px 24px rgba(16, 24, 40, 0.1), 0 2px 6px rgba(16, 24, 40, 0.05);
+    --shadow-pop: 0 16px 48px rgba(16, 24, 40, 0.16), 0 4px 12px rgba(16, 24, 40, 0.08);
+
+    /* 等宽字体 */
+    --font-mono: "Cascadia Code", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
 html,
@@ -32,77 +64,127 @@ body {
 
 body {
     font-family: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-    font-size: 15px;
+    font-size: 14px;
     color: var(--text-primary);
-    background-color: var(--bg-primary);
+    background-color: var(--bg-app);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    line-height: 1.4;
+    line-height: 1.45;
 }
 
 #app {
     height: 100%;
 }
 
+/* ---------- 按钮 ---------- */
 button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 32px;
     cursor: pointer;
-    border: 1px solid var(--border-light);
-    border-radius: 5px;
-    padding: 5px 12px;
-    font-size: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0 14px;
+    font-size: 13px;
     font-weight: 500;
+    font-family: inherit;
     color: var(--text-primary);
-    background: var(--bg-tertiary);
-    transition: all 0.15s ease;
-    letter-spacing: 0.01em;
+    background: #fff;
+    box-shadow: var(--shadow-xs);
+    transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease,
+        box-shadow 0.16s ease, transform 0.08s ease;
+    white-space: nowrap;
+    user-select: none;
 }
 
 button:hover {
-    background: var(--bg-hover);
-    border-color: #9aa4b2;
+    background: var(--bg-inset);
+    border-color: var(--border-strong);
+    color: var(--accent-dim);
 }
 
 button:active {
-    transform: scale(0.97);
+    transform: translateY(1px);
+    box-shadow: none;
+}
+
+button:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 button:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
 }
 
 button.accent {
-    background: var(--accent-dim);
+    background: linear-gradient(180deg, #3b74f5, var(--accent-dim));
     color: #fff;
-    border-color: var(--accent);
+    border-color: var(--accent-dim);
+    box-shadow: 0 1px 2px rgba(29, 78, 216, 0.28), 0 2px 8px rgba(37, 99, 235, 0.18);
 }
 
 button.accent:hover {
-    background: var(--accent);
-    box-shadow: 0 0 12px var(--accent-glow);
+    background: linear-gradient(180deg, #4c80f7, #2358dd);
+    color: #fff;
+    border-color: var(--accent-dim);
+    box-shadow: 0 3px 12px rgba(37, 99, 235, 0.3);
 }
 
+button.danger {
+    color: var(--error);
+    border-color: #f3cfcf;
+    background: #fff;
+}
+
+button.danger:hover {
+    background: var(--error-soft);
+    border-color: #eab3b3;
+    color: var(--error);
+}
+
+/* ---------- 表单 ---------- */
 input,
-select {
-    background: var(--bg-primary);
+select,
+textarea {
+    background: #fff;
     color: var(--text-primary);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 14px;
+    border-radius: var(--radius-sm);
+    padding: 0 10px;
+    height: 32px;
+    font-size: 13px;
     font-family: inherit;
     outline: none;
-    transition: border-color 0.15s;
+    transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
+}
+
+input:hover,
+select:hover {
+    border-color: var(--border-light);
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent-glow);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+    background: #fff;
+}
+
+input::placeholder {
+    color: var(--text-tertiary);
 }
 
 input[type="number"] {
     font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
     -moz-appearance: textfield;
 }
 
@@ -112,14 +194,23 @@ input[type="number"]::-webkit-inner-spin-button {
     margin: 0;
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
 ::selection {
-    background: var(--accent-dim);
+    background: var(--accent);
     color: #fff;
 }
 
 ::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
+    width: 10px;
+    height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -127,10 +218,14 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: var(--border-color);
-    border-radius: 3px;
+    background: #d3dae5;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--border-light);
+    background: #b6c0cf;
+    border: 3px solid transparent;
+    background-clip: content-box;
 }
