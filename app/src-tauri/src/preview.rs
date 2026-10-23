@@ -55,6 +55,9 @@ pub struct ChannelData {
 /// 通道数据帧头标记
 const CHANNEL_MAGIC: u32 = 0xEB_90_A5_5A;
 
+/// 二进制 IPC 帧头 magic：'PRV1'
+const BINARY_MAGIC: u32 = 0x5052_5631;
+
 /// 帧头 magic（8 字节）
 const FRAME_MAGIC: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
 
@@ -214,5 +217,63 @@ impl PreviewFrame {
             wave_length,
             channels,
         })
+    }
+
+    /// 编码为紧凑二进制（小端），供 Tauri IPC Channel 推送。
+    ///
+    /// 布局：
+    /// magic(4) + gps_week(4) + gps_second(f64) + sub_time(4) +
+    /// az/pitch/roll/lat/lon/alt(6×f64) +
+    /// encoder_bits/encoder_value/wave_channels/wave_length(4×u32) +
+    /// channel_count(4) +
+    /// 每通道: channel_id/seg0_start/seg0_len(u16) + seg0_data(u16×len)
+    ///        + seg1_start/seg1_len(u16) + seg1_data(u16×len)
+    pub fn to_binary(&self) -> Vec<u8> {
+        let payload_len: usize = self
+            .channels
+            .iter()
+            .map(|c| 12 + (c.seg0_len as usize + c.seg1_len as usize) * 2)
+            .sum();
+        let mut buf = Vec::with_capacity(88 + payload_len);
+
+        buf.extend_from_slice(&BINARY_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&self.gps_week.to_le_bytes());
+        buf.extend_from_slice(&self.gps_second.to_le_bytes());
+        buf.extend_from_slice(&self.sub_time.to_le_bytes());
+        for v in [
+            self.azimuth,
+            self.pitch,
+            self.roll,
+            self.latitude,
+            self.longitude,
+            self.altitude,
+        ] {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [
+            self.encoder_bits,
+            self.encoder_value,
+            self.wave_channels,
+            self.wave_length,
+        ] {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+        buf.extend_from_slice(&(self.channels.len() as u32).to_le_bytes());
+
+        for ch in &self.channels {
+            buf.extend_from_slice(&ch.channel_id.to_le_bytes());
+            buf.extend_from_slice(&ch.seg0_start.to_le_bytes());
+            buf.extend_from_slice(&ch.seg0_len.to_le_bytes());
+            for &v in &ch.seg0_data {
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            buf.extend_from_slice(&ch.seg1_start.to_le_bytes());
+            buf.extend_from_slice(&ch.seg1_len.to_le_bytes());
+            for &v in &ch.seg1_data {
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+
+        buf
     }
 }

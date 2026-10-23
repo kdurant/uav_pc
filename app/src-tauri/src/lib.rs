@@ -39,9 +39,11 @@ async fn background_udp_listener(
     };
 
     let mut last_preview_emit: Option<Instant> = None;
+    // 复用接收缓冲区：预览 100Hz 时避免每帧 64KB 分配
+    let mut recv_buf = vec![0u8; 65536];
 
     loop {
-        match network.recv_from().await {
+        match network.recv_from(&mut recv_buf).await {
             Ok((frame, addr)) => {
                 // 检查是否有已连接的设备，如果有则只处理来自该设备的帧
                 let connected = {
@@ -81,7 +83,17 @@ async fn background_udp_listener(
                             last_preview_emit = Some(Instant::now());
                             match preview::PreviewFrame::parse(&frame.data) {
                                 Ok(preview_frame) => {
-                                    let _ = app.emit("preview-data", preview_frame);
+                                    // 通过 IPC Channel 推送紧凑二进制（不再走 event/eval）
+                                    let channel = {
+                                        let state = app.state::<Arc<Mutex<NetworkState>>>();
+                                        let guard = state.lock().await;
+                                        guard.preview_channel.clone()
+                                    };
+                                    if let Some(ch) = channel {
+                                        if let Err(e) = ch.send(preview_frame.to_binary()) {
+                                            log::warn!("Failed to send preview data: {}", e);
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     log::warn!("Failed to parse preview data: {}", e);
@@ -126,6 +138,7 @@ pub fn run() {
             connected_device: None,
             seq_counter: 0,
             preview_enabled: false,
+            preview_channel: None,
             frame_tx: frame_tx.clone(),
             op_lock: Arc::new(tokio::sync::Mutex::new(())),
         })))
@@ -151,6 +164,8 @@ pub fn run() {
             commands::save_temperature_history,
             commands::get_temperature_config,
             commands::start_preview,
+            commands::register_preview_channel,
+            commands::unregister_preview_channel,
             commands::list_ssd_files,
             commands::set_ssd_store,
             commands::query_gps_files,

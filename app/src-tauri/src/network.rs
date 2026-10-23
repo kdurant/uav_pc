@@ -62,12 +62,11 @@ impl UdpNetwork {
         Ok(())
     }
 
-    /// 异步接收帧
-    pub async fn recv_from(&self) -> Result<(Frame, SocketAddr), String> {
-        let mut buf = vec![0u8; 65536];
+    /// 异步接收帧（复用调用方缓冲区，避免每帧 64KB 分配）
+    pub async fn recv_from(&self, buf: &mut [u8]) -> Result<(Frame, SocketAddr), String> {
         let (len, addr) = self
             .socket
-            .recv_from(&mut buf)
+            .recv_from(buf)
             .await
             .map_err(|e| format!("Receive failed: {}", e))?;
 

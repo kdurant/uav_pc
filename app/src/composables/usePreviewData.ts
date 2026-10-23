@@ -1,6 +1,7 @@
-import { listen } from "@tauri-apps/api/event";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { onUnmounted } from "vue";
 import type { PreviewFrame } from "../types";
+import { decodePreviewFrame } from "../utils/previewCodec";
 
 /**
  * 一帧预览数据：
@@ -12,7 +13,8 @@ export interface PreviewFrameCallback {
 }
 
 export function usePreviewData(onFrame: PreviewFrameCallback) {
-    let unlistenFn: (() => void) | null = null;
+    // Tauri IPC Channel：Rust 端推送紧凑二进制，前端解码
+    let channel: Channel<number[]> | null = null;
     let active = false;
 
     // 帧合并：事件到达频率高于屏幕刷新率时，只处理最新一帧，避免主线程做无意义的转换
@@ -74,9 +76,21 @@ export function usePreviewData(onFrame: PreviewFrameCallback) {
         if (active) return;
         active = true;
 
-        unlistenFn = await listen<PreviewFrame>("preview-data", (event) => {
-            handleFrame(event.payload);
-        });
+        const ch = new Channel<number[]>();
+        ch.onmessage = (payload) => {
+            if (!active) return;
+            const frame = decodePreviewFrame(new Uint8Array(payload));
+            if (frame) handleFrame(frame);
+        };
+        channel = ch;
+
+        try {
+            await invoke("register_preview_channel", { channel: ch });
+        } catch (e) {
+            console.error("register preview channel failed:", e);
+            active = false;
+            channel = null;
+        }
     }
 
     function stop() {
@@ -86,10 +100,10 @@ export function usePreviewData(onFrame: PreviewFrameCallback) {
             cancelAnimationFrame(rafId);
             rafId = 0;
         }
-        if (unlistenFn) {
-            unlistenFn();
-            unlistenFn = null;
-        }
+        channel = null;
+        void invoke("unregister_preview_channel").catch((e) =>
+            console.error("unregister preview channel failed:", e)
+        );
     }
 
     onUnmounted(() => stop());

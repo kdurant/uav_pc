@@ -15,6 +15,7 @@ const s = computed(() => props.status);
 const tempHistory = ref<TemperaturePoint[]>([]);
 const tempConfig = ref<TemperatureConfig>({ save_points: 180, display_points: 180 });
 const historyVisible = ref(false);
+const historyError = ref("");
 const TEMP_SAMPLE_MS = 10_000;
 let lastTempSampleAt = 0;
 let savingHistory = false;
@@ -35,6 +36,7 @@ onMounted(async () => {
       lastTempSampleAt = saved[saved.length - 1].time;
     }
   } catch (e) {
+    historyError.value = `温度历史加载失败: ${e}`;
     console.error("load temperature history failed:", e);
   }
 });
@@ -59,7 +61,9 @@ watch(
     savingHistory = true;
     try {
       await invoke("save_temperature_history", { points: tempHistory.value });
+      historyError.value = "";
     } catch (e) {
+      historyError.value = `温度历史保存失败: ${e}`;
       console.error("save temperature history failed:", e);
     } finally {
       savingHistory = false;
@@ -278,6 +282,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
           <span class="metric-value">{{ fmt(s?.pps_cycle, 1) }}<i>Hz</i></span>
         </div>
       </div>
+      <p v-if="historyError" class="history-error">{{ historyError }}</p>
       <div class="row-list">
         <div class="status-row">
           <span class="label">触发模式</span>
@@ -495,8 +500,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 }
 
 /* 指标磁贴 */
-.metric-grid {
-  display: grid;
+.metric-grid {  display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-bottom: 6px;
@@ -520,6 +524,16 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 .metric-clickable:hover {
   border-color: #bcd0f8;
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+.history-error {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--error-soft);
+  color: #b42318;
+  font-size: 11.5px;
+  word-break: break-all;
 }
 
 .metric-label {
