@@ -40,10 +40,10 @@ function fmt(v: number | undefined, digits = 2): string {
   return Number(v).toFixed(digits);
 }
 
-/** 电机转速格式化 */
+/** 电机转速格式化（后端已按 1e9/(raw*8)*60 换算为 RPM） */
 function fmtMotorSpeed(v: number | undefined): string {
   if (v === undefined) return "-";
-  return (v / 60).toFixed(1);
+  return v.toFixed(1);
 }
 
 /** 温度通道：ch6/7=板载热敏（外置热敏 ch4/5 不在界面显示） */
@@ -209,7 +209,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
         </div>
         <div class="metric">
           <span class="metric-label">电机转速</span>
-          <span class="metric-value">{{ fmtMotorSpeed(s?.motor_speed) }}<i>Hz</i></span>
+          <span class="metric-value">{{ fmtMotorSpeed(s?.motor_speed) }}<i>RPM</i></span>
         </div>
         <div class="metric">
           <span class="metric-label">触发周期</span>
