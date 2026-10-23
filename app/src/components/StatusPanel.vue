@@ -253,7 +253,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 
     <!-- 采集参数 -->
     <section class="status-group">
-      <h4>采集参数</h4>
+      <h4>采集</h4>
       <div class="row-list">
         <div class="status-row">
           <span class="label">采集状态</span>
