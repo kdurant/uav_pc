@@ -146,6 +146,15 @@ async function handleDisconnect() {
   connectionState.value = ConnectionState.Disconnected;
 }
 
+/** 设备重启/关机命令已发出：立即按断开处理，不再等待状态超时 */
+function handlePowered() {
+  stopStatus();
+  previewOutput.stop();
+  linkLost.value = false;
+  clearSelection();
+  connectionState.value = ConnectionState.Disconnected;
+}
+
 // 启动时自动搜索
 handleSearch();
 </script>
@@ -199,6 +208,7 @@ handleSearch();
             @search="handleSearch"
             @disconnect="handleDisconnect"
             @toggle-status="handleToggleStatus"
+            @powered="handlePowered"
           />
         </div>
       </aside>
