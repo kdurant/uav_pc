@@ -75,9 +75,29 @@ async fn get_or_init_network(app: &AppHandle) -> Result<Arc<UdpNetwork>, String>
 
 // ========== Tauri Commands ==========
 
-/// 发现局域网内设备：发送 0x0100 广播，100ms 内收集响应设备
+/// 发现局域网内设备：发送 0x0100 广播，300ms 内收集响应设备；
+/// `[basic].broadcast_search = false` 时不广播，直接返回 `device_ip`
 #[tauri::command]
 pub async fn discover_devices(app: AppHandle) -> Result<Vec<DiscoveredDevice>, String> {
+    // broadcast_search = false：不广播，直接使用配置中的设备 IP
+    {
+        let config = app.state::<AppConfig>();
+        if !config.basic.broadcast_search {
+            let ip_str = config.basic.device_ip.trim();
+            let ip: std::net::IpAddr = ip_str.parse().map_err(|_| {
+                format!("config.toml [basic].device_ip 未配置或非法: {:?}", ip_str)
+            })?;
+
+            let devices = vec![DiscoveredDevice {
+                ip: ip.to_string(),
+                port: config.basic.remote_port,
+            }];
+            let _ = app.emit("devices-found", devices.clone());
+            log::info!("Broadcast search disabled, using configured device {}", ip);
+            return Ok(devices);
+        }
+    }
+
     let network = get_or_init_network(&app).await?;
     let state = app.state::<Arc<Mutex<NetworkState>>>();
 

@@ -1,7 +1,11 @@
 [basic]
-local_ip = "192.168.1.111"
+local_ip = "192.168.2.111"
 local_port = 12345
 remote_port = 6666
+# true: 通过 UDP 广播搜索设备；false: 直接使用 device_ip 通信
+broadcast_search = false
+# broadcast_search = false 时使用的设备 IP
+device_ip = "192.168.1.10"
 
 [capture]
 preview_coe = 1000

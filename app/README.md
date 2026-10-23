@@ -44,10 +44,16 @@ cd src-tauri && cargo test
 [basic]
 local_ip = "192.168.93.44"
 local_port = 12345
+remote_port = 6666
+broadcast_search = true
+device_ip = ""
 ```
 
 - `local_ip`：本机 IP 地址，用于 UDP 绑定和设备发现
 - `local_port`：UDP 端口号
+- `remote_port`：设备端 UDP 端口号
+- `broadcast_search`：`true` 通过 UDP 广播搜索局域网设备；`false` 跳过广播，直接使用 `device_ip` 通信（默认 `true`）
+- `device_ip`：`broadcast_search = false` 时使用的设备 IP 地址
 
 ## 项目结构
 

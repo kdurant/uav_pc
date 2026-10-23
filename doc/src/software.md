@@ -17,6 +17,11 @@ local_port = 12345
 
 remote_port = 6666
 
+# true: 通过 UDP 广播搜索设备；false: 直接使用 device_ip 通信
+broadcast_search = true
+# broadcast_search = false 时使用的设备 IP
+device_ip = "192.168.93.100"
+
 [capture]
 preview_coe = 1000
 ref_channal = 1
@@ -45,6 +50,10 @@ pin_threshold = 1000
 1. 每次启动上位机后, 使用**local_ip**， **remote_port**，主动发送局域网广播
 2. 设备会使用0x0100命令码上传设备ip地址
 3. 100ms内，如果有多个设备上传ip地址，上位机会弹出选择界面
+
+> 可在 `config.toml` 的 `[basic]` 中设置 `broadcast_search = false`，跳过广播，
+> 直接使用 `device_ip` 指定的设备地址通信（适用于固定 IP 的封闭网络）。
+> 此时不会发送 0x0100 广播，也不检测设备是否在线。
 
 ##  查询设备状态
 使用一个checkbox来决定是否读取设备状态
