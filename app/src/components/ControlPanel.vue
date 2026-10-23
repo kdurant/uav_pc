@@ -550,14 +550,6 @@ function apdFeedbackText(): string {
   return v === undefined ? "-" : (adcVoltage(v) * APD_HV_COEFF).toFixed(1) + " V";
 }
 
-/** 增益页底部的四路反馈读数 */
-const feedbackItems = computed(() => [
-  { key: "pmt1", label: "PMT1 反馈", value: pmtFeedbackText(0), type: "pmt" },
-  { key: "pmt2", label: "PMT2 反馈", value: pmtFeedbackText(1), type: "pmt" },
-  { key: "pmt3", label: "PMT3 反馈", value: pmtFeedbackText(2), type: "pmt" },
-  { key: "apd", label: "APD 高压反馈", value: apdFeedbackText(), type: "apd" },
-]);
-
 // ===== Tab =====
 const activeTab = ref("laser");
 const tabs = [
@@ -725,6 +717,7 @@ function selectTab(key: string) {
             <button class="set-btn" :disabled="daSetting !== null" @click="setDaChannel(0)">
               {{ daSetting === 0 ? "..." : "设置" }}
             </button>
+            <span class="channel-feedback" title="设备回读值">{{ pmtFeedbackText(0) }}</span>
           </div>
         </div>
 
@@ -738,6 +731,7 @@ function selectTab(key: string) {
             <button class="set-btn" :disabled="daSetting !== null" @click="setDaChannel(1)">
               {{ daSetting === 1 ? "..." : "设置" }}
             </button>
+            <span class="channel-feedback" title="设备回读值">{{ pmtFeedbackText(1) }}</span>
           </div>
         </div>
 
@@ -751,6 +745,7 @@ function selectTab(key: string) {
             <button class="set-btn" :disabled="daSetting !== null" @click="setDaChannel(2)">
               {{ daSetting === 2 ? "..." : "设置" }}
             </button>
+            <span class="channel-feedback" title="设备回读值">{{ pmtFeedbackText(2) }}</span>
           </div>
         </div>
 
@@ -764,23 +759,12 @@ function selectTab(key: string) {
             <button class="set-btn" :disabled="daSetting !== null" @click="setDaChannel(3)">
               {{ daSetting === 3 ? "..." : "设置" }}
             </button>
+            <span class="channel-feedback" title="设备回读值">{{ apdFeedbackText() }}</span>
           </div>
         </div>
 
         <p class="hint">ch0~ch2 = PMT0~2（0~5V），ch3 = APD 高压（140~300V）</p>
-      </section>
-
-      <section class="ctrl-group">
-        <h4 class="group-title">实时反馈</h4>
-        <div class="feedback-list">
-          <div v-for="item in feedbackItems" :key="item.key" class="feedback-row">
-            <span class="feedback-name">
-              <span class="ch-dot" :class="item.type"></span>{{ item.label }}
-            </span>
-            <span class="feedback-val">{{ item.value }}</span>
-          </div>
-        </div>
-        <p class="hint">反馈值随设备状态更新（约 1s 一次）。</p>
+        <p class="hint">右侧为设备回读值，随状态更新（约 1s 一次）。</p>
       </section>
     </div>
 
@@ -1440,6 +1424,19 @@ function selectTab(key: string) {
   min-width: 0;
   height: 30px;
   font-size: 12.5px;
+}
+
+/* 设置项右侧的设备回读值 */
+.channel-feedback {
+  flex-shrink: 0;
+  min-width: 58px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-dim);
+  line-height: 30px;
+  white-space: nowrap;
 }
 
 .hint {
