@@ -90,6 +90,34 @@ const frameStart = ref(0);
 const frameAxisEnd = ref(0);
 const DEFAULT_X_SCALE = 1.2;
 
+// 各通道整帧峰峰值（最大值 − 最小值），null 表示无有效数据
+const vppValues = ref<(number | null)[]>([]);
+// 峰峰值读数刷新间隔：不需要跟 30Hz 数据同步刷新，降低 DOM 更新频率
+const VPP_UPDATE_INTERVAL_MS = 200;
+let lastVppUpdate = 0;
+
+/** 计算各通道整帧峰峰值（忽略 NaN 空档） */
+function updateVpp(series: number[][], force = false) {
+  const now = performance.now();
+  if (!force && now - lastVppUpdate < VPP_UPDATE_INTERVAL_MS) return;
+  lastVppUpdate = now;
+
+  const values: (number | null)[] = [];
+  for (let ch = 0; ch < props.channelCount; ch++) {
+    const arr = series[ch] || [];
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < arr.length; i++) {
+      const v = arr[i];
+      if (!Number.isFinite(v)) continue;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    values.push(max >= min ? Math.round(max - min) : null);
+  }
+  vppValues.value = values;
+}
+
 /** 用一整帧预览数据刷新图表（按绝对采样位置对齐，NaN 为空档） */
 function setFrame(series: number[][]) {
   frameMode.value = true;
@@ -97,6 +125,7 @@ function setFrame(series: number[][]) {
   const len = series.reduce((m, s) => Math.max(m, s.length), 0);
   frameAxisEnd.value = Math.max(1, Math.round(len * DEFAULT_X_SCALE));
   chart.setFrame(series, 0);
+  updateVpp(series);
 }
 
 // 框选缩放状态
@@ -296,7 +325,10 @@ function render(buffers: Float64Array[]) {
 
   // 无数据时显示占位提示（数据驱动，避免每帧刷新 DOM）
   const hasData = totalPoints > 0;
-  if (hasData !== chartHasData.value) chartHasData.value = hasData;
+  if (hasData !== chartHasData.value) {
+    chartHasData.value = hasData;
+    if (!hasData) vppValues.value = [];
+  }
 
   // 计算 Y 轴范围
   let yMin: number, yMax: number;
@@ -683,6 +715,22 @@ onUnmounted(() => {
 
 <template>
   <div ref="containerRef" class="chart-container">
+    <!-- 各通道整帧峰峰值 -->
+    <div class="vpp-bar">
+      <span class="vpp-title" title="整帧数据的峰峰值（最大值 − 最小值，单位：ADC counts）">峰峰值</span>
+      <span
+        v-for="ch in props.channelCount"
+        :key="ch"
+        class="vpp-item"
+        :class="{ off: !props.channelVisible[ch - 1] }"
+        :style="{ '--ch-color': props.lineColors[ch - 1] }"
+      >
+        <span class="vpp-dot"></span>
+        <span class="vpp-ch">CH{{ ch - 1 }}</span>
+        <span class="vpp-val">{{ vppValues[ch - 1] ?? '--' }}</span>
+      </span>
+    </div>
+
     <div class="canvas-wrap">
       <canvas ref="canvasRef"></canvas>
       <div v-if="!chartHasData" class="chart-empty">
@@ -774,6 +822,67 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   display: flex;
+}
+
+/* 峰峰值读数栏 */
+.vpp-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 32px;
+  padding: 0 14px;
+  background: #fbfcfe;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+}
+
+.vpp-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.vpp-title {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.vpp-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.vpp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ch-color, var(--accent));
+  flex-shrink: 0;
+}
+
+.vpp-ch {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.vpp-val {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.vpp-item.off {
+  opacity: 0.45;
 }
 
 canvas {
