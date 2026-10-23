@@ -111,8 +111,10 @@ async fn background_udp_listener(
 pub fn run() {
     env_logger::init();
 
-    let app_config = config::AppConfig::load_or_create("config.toml")
+    let config_path = config::app_dir().join("config.toml");
+    let app_config = config::AppConfig::load_or_create(&config_path)
         .expect("Failed to load or create config.toml");
+    log::info!("Using config file: {}", config_path.display());
 
     let (frame_tx, _) = broadcast::channel::<(crate::protocol::Frame, std::net::SocketAddr)>(256);
     let frame_tx_setup = frame_tx.clone();

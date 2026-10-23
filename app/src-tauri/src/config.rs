@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BasicConfig {
@@ -129,24 +130,37 @@ impl Default for GpsConfig {
 }
 
 impl AppConfig {
-    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let content = std::fs::read_to_string(path)?;
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let content = std::fs::read_to_string(path.as_ref())?;
         let config: AppConfig = toml::from_str(&content)?;
         Ok(config)
     }
 
     /// 加载配置；若文件不存在则先写入默认配置再返回
-    pub fn load_or_create(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        if std::path::Path::new(path).exists() {
+    pub fn load_or_create<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let path = path.as_ref();
+        if path.exists() {
             return Self::load(path);
         }
 
         let config = AppConfig::default();
         let content = toml::to_string_pretty(&config)?;
         std::fs::write(path, content)?;
-        log::info!("Config file not found, created default: {}", path);
+        log::info!(
+            "Config file not found, created default: {}",
+            path.display()
+        );
         Ok(config)
     }
+}
+
+/// 可执行文件所在目录。
+/// `config.toml` 与温度历史文件都放在这里，避免依赖启动时的工作目录。
+pub fn app_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 #[cfg(test)]

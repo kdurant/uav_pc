@@ -8,7 +8,7 @@
 
 
 # 配置文件
-- 使用config.toml作为配置文件
+- 使用与可执行文件同目录的 config.toml 作为配置文件（不存在时首次启动自动生成）
 ## 配置文件选项
 ```toml
 [basic]
@@ -93,5 +93,5 @@ display_points = 180
 
 ## 板载温度历史
 1. 连接后每 10 秒记录一次板载温度，点击设备状态中的“板载温度”查看曲线
-2. 历史点保存到运行目录的 `temperature_history.json`，启动时自动加载
+2. 历史点保存到可执行文件同目录的 `temperature_history.json`，启动时自动加载
 3. `[temperature]` 的 `save_points` 控制文件保存点数，`display_points` 控制曲线显示点数

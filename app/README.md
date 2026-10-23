@@ -69,7 +69,7 @@ display_points = 180
 - `save_points`：历史温度文件最多保存的点数（每 10 秒一点，180 点约 30 分钟）
 - `display_points`：温度曲线最多显示的点数
 
-历史数据保存在运行目录的 `temperature_history.json`，启动时自动加载。
+历史数据保存在可执行文件同目录的 `temperature_history.json`，启动时自动加载；`config.toml` 也位于同一目录（首次运行不存在时自动生成）。
 
 ## 项目结构
 

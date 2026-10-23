@@ -88,8 +88,13 @@ pub struct TemperaturePoint {
     pub temp: f64,
 }
 
-/// 温度历史文件（与 config.toml 同目录）
+/// 温度历史文件名（与可执行文件同目录）
 const TEMP_HISTORY_FILE: &str = "temperature_history.json";
+
+/// 温度历史文件完整路径
+fn temperature_history_path() -> std::path::PathBuf {
+    crate::config::app_dir().join(TEMP_HISTORY_FILE)
+}
 
 /// 读取历史温度点；文件不存在或损坏时返回空列表
 #[tauri::command]
@@ -98,7 +103,8 @@ pub async fn load_temperature_history(app: AppHandle) -> Result<Vec<TemperatureP
         let config = app.state::<AppConfig>();
         config.temperature.save_points.max(1)
     };
-    let Ok(text) = std::fs::read_to_string(TEMP_HISTORY_FILE) else {
+    let path = temperature_history_path();
+    let Ok(text) = std::fs::read_to_string(&path) else {
         return Ok(Vec::new());
     };
     let mut points: Vec<TemperaturePoint> = serde_json::from_str(&text).unwrap_or_default();
@@ -107,7 +113,7 @@ pub async fn load_temperature_history(app: AppHandle) -> Result<Vec<TemperatureP
     log::info!(
         "Loaded {} temperature history points from {}",
         points.len(),
-        TEMP_HISTORY_FILE
+        path.display()
     );
     Ok(points)
 }
@@ -125,7 +131,8 @@ pub async fn save_temperature_history(
     let start = points.len().saturating_sub(save_points);
     let kept = &points[start..];
     let text = serde_json::to_string(kept).map_err(|e| format!("序列化温度历史失败: {}", e))?;
-    std::fs::write(TEMP_HISTORY_FILE, text).map_err(|e| format!("写入温度历史失败: {}", e))
+    std::fs::write(temperature_history_path(), text)
+        .map_err(|e| format!("写入温度历史失败: {}", e))
 }
 
 /// 读取温度历史配置
