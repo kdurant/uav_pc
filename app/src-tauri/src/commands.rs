@@ -342,6 +342,107 @@ async fn read_ssd_sector(
     Err(format!("读取扇区 {} 失败", sector))
 }
 
+/// 构造文件名扇区：前 32 字节为 ASCII 文件名（不足补 0x00），其余 480 字节补 0xee
+fn build_ssd_name_sector(name: &str) -> Result<Vec<u8>, String> {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() {
+        return Err("文件名不能为空".into());
+    }
+    if bytes.len() > 32 {
+        return Err("文件名不能超过 32 字节".into());
+    }
+    if !bytes.iter().all(|&b| (0x20..=0x7e).contains(&b)) {
+        return Err("文件名仅支持 ASCII 可打印字符".into());
+    }
+
+    let mut sector = vec![0xeeu8; SSD_SECTOR_SIZE as usize];
+    sector[..32].fill(0);
+    sector[..bytes.len()].copy_from_slice(bytes);
+    Ok(sector)
+}
+
+/// 发送一条 SSD 操作命令
+async fn send_ssd_command(
+    network: &Arc<UdpNetwork>,
+    target: &SocketAddr,
+    cmd: u16,
+    data: Vec<u8>,
+    seq: u16,
+) -> Result<(), String> {
+    let mut frame = Frame::new(cmd, SourceAddr::PC as u16, DestAddr::PS as u16, data);
+    frame.seq = seq;
+    network.send_to(target, &frame).await
+}
+
+/// SSD 文件表扫描结果
+struct SsdDirectory {
+    /// 有效文件
+    files: Vec<SsdFile>,
+    /// 第一个空闲目录槽位（文件名扇区为空）
+    first_free: Option<usize>,
+    /// 已有文件数据区的最大结束地址
+    max_end: u64,
+}
+
+/// 扫描 SSD 文件表（0x0400），返回有效文件、空闲槽位与数据区末尾
+async fn scan_ssd_directory(
+    network: &Arc<UdpNetwork>,
+    target: &SocketAddr,
+    rx: &mut broadcast::Receiver<(Frame, SocketAddr)>,
+) -> Result<SsdDirectory, String> {
+    let mut files: Vec<SsdFile> = Vec::new();
+    let mut first_free: Option<usize> = None;
+    let mut empty_run = 0usize;
+    let mut max_end = SSD_DATA_START;
+    let mut seq: u16 = 0;
+
+    for i in 0..SSD_MAX_FILES {
+        // 文件名在偶数扇区 2i，起止地址在奇数扇区 2i+1
+        let name_sector = read_ssd_sector(network, target, rx, (2 * i) as u64, seq).await?;
+        seq = seq.wrapping_add(1);
+
+        let name = parse_ssd_name(&name_sector);
+        if name.is_empty() {
+            if first_free.is_none() {
+                first_free = Some(i);
+            }
+            empty_run += 1;
+            if empty_run >= SSD_EMPTY_STOP {
+                break;
+            }
+            continue;
+        }
+        empty_run = 0;
+
+        let addr_sector =
+            read_ssd_sector(network, target, rx, (2 * i + 1) as u64, seq).await?;
+        seq = seq.wrapping_add(1);
+
+        let start = u64::from_be_bytes(addr_sector[0..8].try_into().unwrap());
+        let end = u64::from_be_bytes(addr_sector[8..16].try_into().unwrap());
+
+        // 地址合法才视为有效文件（数据区从 8192 扇区开始，结束地址须大于起始地址）
+        if start >= SSD_DATA_START && end > start {
+            max_end = max_end.max(end);
+            files.push(SsdFile {
+                name,
+                start,
+                end,
+                size: (end - start) * SSD_SECTOR_SIZE,
+            });
+        } else if start >= SSD_DATA_START {
+            // 已创建但尚未写入结束地址的文件：避免新文件覆盖其数据区
+            max_end = max_end.max(start);
+        }
+    }
+
+    Ok(SsdDirectory {
+        files,
+        first_free,
+        max_end,
+    })
+}
+
 /// 检索 SSD 已存储文件：逐条目读取文件表（0x0400），返回文件名/起始/结束/大小
 #[tauri::command]
 pub async fn list_ssd_files(app: AppHandle, device_ip: String) -> Result<Vec<SsdFile>, String> {
@@ -359,45 +460,83 @@ pub async fn list_ssd_files(app: AppHandle, device_ip: String) -> Result<Vec<Ssd
         guard.frame_tx.subscribe()
     };
 
-    let mut files: Vec<SsdFile> = Vec::new();
-    let mut empty_run = 0usize;
-    let mut seq: u16 = 0;
+    let dir = scan_ssd_directory(&network, &target, &mut rx).await?;
+    log::info!("Listed {} SSD file(s) from {}", dir.files.len(), device_ip);
+    Ok(dir.files)
+}
 
-    for i in 0..SSD_MAX_FILES {
-        // 文件名在偶数扇区 2i，起止地址在奇数扇区 2i+1
-        let name_sector = read_ssd_sector(&network, &target, &mut rx, (2 * i) as u64, seq).await?;
-        seq = seq.wrapping_add(1);
+/// 开始/停止 SSD 存储。
+///
+/// 开始存储需要按协议顺序执行：
+///   0x0402(文件名扇区) → 0x0403(文件名) → 0x0402(数据起始 LBA) → 0x0406(开始)
+/// 仅发送 0x0406 时设备没有文件名和写入地址，文件表不会产生记录。
+#[tauri::command]
+pub async fn set_ssd_store(
+    app: AppHandle,
+    device_ip: String,
+    enable: bool,
+    filename: Option<String>,
+) -> Result<(), String> {
+    let network = get_or_init_network(&app).await?;
 
-        let name = parse_ssd_name(&name_sector);
-        if name.is_empty() {
-            empty_run += 1;
-            if empty_run >= SSD_EMPTY_STOP {
-                break;
-            }
-            continue;
-        }
-        empty_run = 0;
+    let config = app.state::<AppConfig>();
+    let target: SocketAddr = format!("{}:{}", device_ip, config.basic.remote_port)
+        .parse()
+        .map_err(|e| format!("Invalid device address: {}", e))?;
 
-        let addr_sector =
-            read_ssd_sector(&network, &target, &mut rx, (2 * i + 1) as u64, seq).await?;
-        seq = seq.wrapping_add(1);
+    let mut seq = next_seq_inner(&app).await;
 
-        let start = u64::from_be_bytes(addr_sector[0..8].try_into().unwrap());
-        let end = u64::from_be_bytes(addr_sector[8..16].try_into().unwrap());
-
-        // 地址合法才视为有效文件（数据区从 8192 扇区开始，结束地址须大于起始地址）
-        if start >= SSD_DATA_START && end > start {
-            files.push(SsdFile {
-                name,
-                start,
-                end,
-                size: (end - start) * SSD_SECTOR_SIZE,
-            });
-        }
+    if !enable {
+        send_ssd_command(&network, &target, 0x0406, 0u32.to_be_bytes().to_vec(), seq).await?;
+        log::info!("Stop SSD store on {}", device_ip);
+        return Ok(());
     }
 
-    log::info!("Listed {} SSD file(s) from {}", files.len(), device_ip);
-    Ok(files)
+    let name = filename.unwrap_or_default();
+    let name_sector = build_ssd_name_sector(&name)?;
+
+    // 先订阅广播通道，扫描文件表时才能收到 0x0400 响应
+    let mut rx = {
+        let state = app.state::<Arc<Mutex<NetworkState>>>();
+        let guard = state.lock().await;
+        guard.frame_tx.subscribe()
+    };
+
+    let dir = scan_ssd_directory(&network, &target, &mut rx).await?;
+    let slot = dir
+        .first_free
+        .ok_or_else(|| "SSD 文件表已满（最多 1024 个文件）".to_string())?;
+
+    // 1) 设置文件名存放扇区
+    send_ssd_command(
+        &network,
+        &target,
+        0x0402,
+        ((2 * slot) as u64).to_be_bytes().to_vec(),
+        seq,
+    )
+    .await?;
+    seq = seq.wrapping_add(1);
+
+    // 2) 写入文件名扇区
+    send_ssd_command(&network, &target, 0x0403, name_sector, seq).await?;
+    seq = seq.wrapping_add(1);
+
+    // 3) 设置采集数据起始扇区
+    send_ssd_command(&network, &target, 0x0402, dir.max_end.to_be_bytes().to_vec(), seq).await?;
+    seq = seq.wrapping_add(1);
+
+    // 4) 开始存储
+    send_ssd_command(&network, &target, 0x0406, 1u32.to_be_bytes().to_vec(), seq).await?;
+
+    log::info!(
+        "Start SSD store '{}' (slot={}, data_lba={}) on {}",
+        name,
+        slot,
+        dir.max_end,
+        device_ip
+    );
+    Ok(())
 }
 
 /// 系统指令（0x0110）收到最后一个包后的静默判定窗口
@@ -494,7 +633,7 @@ pub async fn query_gps_files(app: AppHandle, device_ip: String) -> Result<Vec<St
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_ssd_name, resolve_device_ip};
+    use super::{build_ssd_name_sector, parse_ssd_name, resolve_device_ip};
     use std::net::SocketAddr;
 
     #[test]
@@ -523,5 +662,23 @@ mod tests {
         assert_eq!(parse_ssd_name(&vec![0xeeu8; 512]), "");
         assert_eq!(parse_ssd_name(&vec![0xddu8; 512]), "");
         assert_eq!(parse_ssd_name(&vec![0x00u8; 512]), "");
+    }
+
+    #[test]
+    fn test_build_name_sector() {
+        let sec = build_ssd_name_sector("uav_20261023_120000").unwrap();
+        assert_eq!(sec.len(), 512);
+        assert_eq!(&sec[..19], b"uav_20261023_120000");
+        // 文件名后补 0x00 至 32 字节，其余补 0xee
+        assert_eq!(sec[19], 0x00);
+        assert_eq!(sec[31], 0x00);
+        assert_eq!(sec[32], 0xee);
+        assert_eq!(sec[511], 0xee);
+        // 与解析函数互逆
+        assert_eq!(parse_ssd_name(&sec), "uav_20261023_120000");
+
+        assert!(build_ssd_name_sector("").is_err());
+        assert!(build_ssd_name_sector("文件名").is_err());
+        assert!(build_ssd_name_sector(&"a".repeat(33)).is_err());
     }
 }

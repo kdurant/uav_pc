@@ -142,6 +142,7 @@ pub fn run() {
             commands::send_command,
             commands::start_preview,
             commands::list_ssd_files,
+            commands::set_ssd_store,
             commands::query_gps_files,
         ])
         .run(tauri::generate_context!())
