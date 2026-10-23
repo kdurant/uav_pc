@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { LaserStatus, MotorState, SsdFile, SystemStatus } from "../types";
 import StorageDrawer from "./StorageDrawer.vue";
+import PowerDialog from "./PowerDialog.vue";
 
 /** 通用命令按钮 Props */
 const props = defineProps<{
@@ -16,6 +17,7 @@ const emit = defineEmits<{
   (e: "search"): void;
   (e: "disconnect"): void;
   (e: "toggle-status", enable: boolean): void;
+  (e: "powered", action: "reboot" | "shutdown"): void;
 }>();
 
 const statusPollingEnabled = ref(true);
@@ -190,6 +192,83 @@ watch(
     motorError.value = "";
   }
 );
+
+// ===== 设备电源控制（0x0103 重启 / 0x0104 关机） =====
+const powerDialogVisible = ref(false);
+const powerAction = ref<"reboot" | "shutdown">("reboot");
+const powerPhase = ref<"confirm" | "countdown" | "done">("confirm");
+const powerRemaining = ref(0);
+const powerBusy = ref(false);
+const powerError = ref("");
+let powerCountdownTimer: number | null = null;
+
+function stopPowerCountdown() {
+  if (powerCountdownTimer !== null) {
+    window.clearInterval(powerCountdownTimer);
+    powerCountdownTimer = null;
+  }
+}
+
+function startPowerCountdown() {
+  stopPowerCountdown();
+  powerCountdownTimer = window.setInterval(() => {
+    if (powerRemaining.value > 0) {
+      powerRemaining.value -= 1;
+    }
+    if (powerRemaining.value <= 0) {
+      stopPowerCountdown();
+      powerPhase.value = "done";
+    }
+  }, 1000);
+}
+
+/** 打开电源操作对话框（确认阶段） */
+function openPowerDialog(action: "reboot" | "shutdown") {
+  if (!props.connected || !props.deviceIp) return;
+  stopPowerCountdown();
+  powerAction.value = action;
+  powerPhase.value = "confirm";
+  powerRemaining.value = action === "reboot" ? 25 : 15;
+  powerError.value = "";
+  powerDialogVisible.value = true;
+}
+
+function cancelPowerDialog() {
+  powerDialogVisible.value = false;
+  powerError.value = "";
+}
+
+function closePowerDialog() {
+  stopPowerCountdown();
+  powerDialogVisible.value = false;
+}
+
+/** 确认后下发命令，并进入倒计时阶段 */
+async function confirmPower() {
+  if (!props.deviceIp || powerBusy.value) return;
+  powerBusy.value = true;
+  powerError.value = "";
+  try {
+    const action = powerAction.value;
+    const cmd = action === "reboot" ? 0x0103 : 0x0104;
+    await invoke("send_command", {
+      deviceIp: props.deviceIp,
+      cmd,
+      data: [0, 0, 0, 1],
+    });
+    powerPhase.value = "countdown";
+    powerRemaining.value = action === "reboot" ? 25 : 15;
+    startPowerCountdown();
+    emit("powered", action);
+  } catch (e) {
+    powerError.value = String(e);
+    console.error(`power command failed:`, e);
+  } finally {
+    powerBusy.value = false;
+  }
+}
+
+onUnmounted(stopPowerCountdown);
 
 // ===== 采集控制 =====
 const previewEnabled = ref(false);
@@ -480,12 +559,12 @@ const feedbackItems = computed(() => [
 ]);
 
 // ===== Tab =====
-const activeTab = ref("capture");
+const activeTab = ref("laser");
 const tabs = [
   { key: "laser", label: "激光器" },
   { key: "motor", label: "电机" },
   { key: "voltage", label: "增益" },
-  { key: "capture", label: "采集参数" },
+  { key: "capture", label: "采集" },
   { key: "storage", label: "存储" },
 ];
 
@@ -528,6 +607,23 @@ function selectTab(key: string) {
           <span class="k">运行时间</span>
           <span class="v mono">{{ formatUptime(status?.uptime) }}</span>
         </div>
+      </div>
+
+      <div class="power-actions">
+        <button
+          class="danger"
+          :disabled="!connected || powerBusy"
+          @click="openPowerDialog('reboot')"
+        >
+          重启
+        </button>
+        <button
+          class="danger"
+          :disabled="!connected || powerBusy"
+          @click="openPowerDialog('shutdown')"
+        >
+          关机
+        </button>
       </div>
     </section>
 
@@ -935,6 +1031,17 @@ function selectTab(key: string) {
       @close="gpsDrawerVisible = false"
       @refresh="refreshGpsFiles"
     />
+
+    <PowerDialog
+      :visible="powerDialogVisible"
+      :action="powerAction"
+      :phase="powerPhase"
+      :remaining="powerRemaining"
+      :error="powerError"
+      @confirm="confirmPower"
+      @cancel="cancelPowerDialog"
+      @close="closePowerDialog"
+    />
   </div>
 </template>
 
@@ -986,6 +1093,19 @@ function selectTab(key: string) {
 .device-meta-row .v.mono {
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+/* 设备电源操作 */
+.power-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.power-actions button {
+  flex: 1;
+  height: 30px;
+  font-size: 12px;
 }
 
 .group-title {
