@@ -97,16 +97,19 @@ async function queryLaserStatus() {
 
 const laserStatusItems = computed(() => {
   const s = laserStatus.value;
-  if (!s) return [];
+  const dash = "-";
   return [
-    { label: "开关状态", value: s.status === 0 ? "关闭" : "开启" },
-    { label: "错误码", value: `0x${s.error_code.toString(16).padStart(2, "0")}` },
-    { label: "箱体温度", value: `${s.box_temp.toFixed(1)} ℃` },
-    { label: "泵浦1温度", value: `${s.pump1_temp.toFixed(1)} ℃` },
-    { label: "泵浦2温度", value: `${s.pump2_temp.toFixed(1)} ℃` },
-    { label: "泵浦1电流", value: `${s.pump1_current} mA` },
-    { label: "泵浦2电流", value: `${s.pump2_current} mA` },
-    { label: "输出功率", value: `${(s.export_power / 1000).toFixed(2)} W` },
+    { label: "开关状态", value: s ? (s.status === 0 ? "关闭" : "开启") : dash },
+    {
+      label: "错误码",
+      value: s ? `0x${s.error_code.toString(16).padStart(2, "0")}` : dash,
+    },
+    { label: "箱体温度", value: s ? `${s.box_temp.toFixed(1)} ℃` : dash },
+    { label: "泵浦1温度", value: s ? `${s.pump1_temp.toFixed(1)} ℃` : dash },
+    { label: "泵浦2温度", value: s ? `${s.pump2_temp.toFixed(1)} ℃` : dash },
+    { label: "泵浦1电流", value: s ? `${s.pump1_current} mA` : dash },
+    { label: "泵浦2电流", value: s ? `${s.pump2_current} mA` : dash },
+    { label: "输出功率", value: s ? `${(s.export_power / 1000).toFixed(2)} W` : dash },
   ];
 });
 
@@ -725,15 +728,15 @@ function selectTab(key: string) {
           {{ laserBusy ? "查询中..." : "查询状态" }}
         </button>
 
-        <div v-if="laserStatusItems.length" class="feedback-list">
+        <div class="feedback-list">
           <div v-for="item in laserStatusItems" :key="item.label" class="feedback-row">
             <span class="feedback-name">{{ item.label }}</span>
             <span class="feedback-val">{{ item.value }}</span>
           </div>
         </div>
-        <p v-else class="hint">点击“查询状态”读取激光器温度、电流与输出功率。</p>
 
         <p v-if="laserError" class="ssd-error">{{ laserError }}</p>
+        <p class="hint">未查询或未连接时显示占位值；点击“查询状态”刷新读数。</p>
         <p class="hint">激光器命令经采集卡透传，单次操作最长等待 1 秒；打开时会自动重新下发电流。</p>
       </section>
     </div>

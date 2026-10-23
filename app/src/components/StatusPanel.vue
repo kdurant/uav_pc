@@ -6,7 +6,11 @@ const props = defineProps<{
   status: SystemStatus | null;
 }>();
 
-function formatUptime(seconds: number): string {
+/** 方便模板安全访问 */
+const s = computed(() => props.status);
+
+function formatUptime(seconds: number | undefined): string {
+  if (seconds === undefined) return "-";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
@@ -14,9 +18,28 @@ function formatUptime(seconds: number): string {
 }
 
 /** 硬盘容量：单位 GB，按 1GB = 1024MB（1024³ 字节）换算 */
-function formatDiskSize(sectors: number): string {
+function formatDiskSize(sectors: number | undefined): string {
+  if (sectors === undefined) return "-";
   const bytes = sectors * 512;
   return (bytes / 1024 ** 3).toFixed(2) + " GB";
+}
+
+/** 固定小数位，无数据时显示 "-" */
+function fmtFixed(v: number | undefined, digits: number): string {
+  if (v === undefined || v === null) return "-";
+  return v.toFixed(digits);
+}
+
+/** SATA 连接状态文本 */
+function sataText(v: number | undefined): string {
+  if (v === undefined) return "-";
+  return v === 1 ? "已连接" : "未连接";
+}
+
+/** SATA 连接状态标签样式 */
+function sataClass(v: number | undefined): string {
+  if (v === undefined) return "";
+  return v === 1 ? "status-on" : "status-off";
 }
 
 /** 状态值格式化，保留 2 位小数 */
@@ -166,22 +189,23 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 </script>
 
 <template>
-  <div class="status-panel" v-if="props.status">
+  <div class="status-panel">
+    <div v-if="!s" class="status-offline">设备未连接，以下为占位数据</div>
     <!-- 设备信息 -->
     <section class="status-group">
       <h4>设备信息</h4>
       <div class="row-list">
         <div class="status-row">
           <span class="label">设备SN</span>
-          <span class="value mono">{{ props.status.device_sn || "-" }}</span>
+          <span class="value mono">{{ s?.device_sn || "-" }}</span>
         </div>
         <div class="status-row">
           <span class="label">设备类型</span>
-          <span class="value">{{ props.status.device_type || "-" }}</span>
+          <span class="value">{{ s?.device_type || "-" }}</span>
         </div>
         <div class="status-row">
           <span class="label">运行时间</span>
-          <span class="value mono">{{ formatUptime(props.status.uptime) }}</span>
+          <span class="value mono">{{ formatUptime(s?.uptime) }}</span>
         </div>
       </div>
     </section>
@@ -192,11 +216,11 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <div class="row-list">
         <div class="status-row">
           <span class="label">PS版本</span>
-          <span class="value mono">{{ props.status.ps_version || "-" }}</span>
+          <span class="value mono">{{ s?.ps_version || "-" }}</span>
         </div>
         <div class="status-row">
           <span class="label">PL版本</span>
-          <span class="value mono">{{ props.status.pl_version || "-" }}</span>
+          <span class="value mono">{{ s?.pl_version || "-" }}</span>
         </div>
       </div>
     </section>
@@ -207,31 +231,31 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <div class="metric-grid">
         <div class="metric">
           <span class="metric-label">板载温度</span>
-          <span class="metric-value" :style="{ color: tempColor(props.status.i2c_temp) }">
-            {{ fmt(props.status.i2c_temp, 1) }}<i>°C</i>
+          <span class="metric-value" :style="{ color: tempColor(s?.i2c_temp) }">
+            {{ fmt(s?.i2c_temp, 1) }}<i>°C</i>
           </span>
         </div>
         <div class="metric">
           <span class="metric-label">电机转速</span>
-          <span class="metric-value">{{ fmtMotorSpeed(props.status.motor_speed) }}<i>Hz</i></span>
+          <span class="metric-value">{{ fmtMotorSpeed(s?.motor_speed) }}<i>Hz</i></span>
         </div>
         <div class="metric">
           <span class="metric-label">触发周期</span>
-          <span class="metric-value">{{ fmt(props.status.trg_cycle, 1) }}<i>Hz</i></span>
+          <span class="metric-value">{{ fmt(s?.trg_cycle, 1) }}<i>Hz</i></span>
         </div>
         <div class="metric">
           <span class="metric-label">PPS 周期</span>
-          <span class="metric-value">{{ fmt(props.status.pps_cycle, 1) }}<i>Hz</i></span>
+          <span class="metric-value">{{ fmt(s?.pps_cycle, 1) }}<i>Hz</i></span>
         </div>
       </div>
       <div class="row-list">
         <div class="status-row">
           <span class="label">触发模式</span>
-          <span class="value">{{ trgModeLabel(props.status.trg_mode) }}</span>
+          <span class="value">{{ trgModeLabel(s?.trg_mode) }}</span>
         </div>
         <div class="status-row">
           <span class="label">激光频率</span>
-          <span class="value mono">{{ props.status.laser_freq || 0 }} Hz</span>
+          <span class="value mono">{{ s ? s.laser_freq + " Hz" : "-" }}</span>
         </div>
       </div>
     </section>
@@ -261,25 +285,25 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <div class="row-list">
         <div class="status-row">
           <span class="label">采集状态</span>
-          <span class="badge" :class="statusLabel(props.status.preview_enable).cls">
-            {{ statusLabel(props.status.preview_enable).text }}
+          <span class="badge" :class="statusLabel(s?.preview_enable).cls">
+            {{ statusLabel(s?.preview_enable).text }}
           </span>
         </div>
         <div class="status-row">
           <span class="label">抽样率</span>
-          <span class="value mono">{{ props.status.preview_coe || 0 }}</span>
+          <span class="value mono">{{ s?.preview_coe ?? "-" }}</span>
         </div>
         <div class="status-row">
           <span class="label">采集长度</span>
-          <span class="value mono">{{ props.status.wave_len || 0 }}</span>
+          <span class="value mono">{{ s?.wave_len ?? "-" }}</span>
         </div>
         <div class="status-row">
           <span class="label">第一段</span>
-          <span class="value mono">pos {{ props.status.first_pos }} · len {{ props.status.first_len }}</span>
+          <span class="value mono">pos {{ s?.first_pos ?? "-" }} · len {{ s?.first_len ?? "-" }}</span>
         </div>
         <div class="status-row">
           <span class="label">第二段</span>
-          <span class="value mono">pos {{ props.status.second_pos }} · len {{ props.status.second_len }}</span>
+          <span class="value mono">pos {{ s?.second_pos ?? "-" }} · len {{ s?.second_len ?? "-" }}</span>
         </div>
       </div>
     </section>
@@ -290,19 +314,19 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <div class="row-list">
         <div class="status-row">
           <span class="label">存储状态</span>
-          <span class="badge" :class="statusLabel(props.status.ssd_store_enable).cls">
-            {{ statusLabel(props.status.ssd_store_enable).text }}
+          <span class="badge" :class="statusLabel(s?.ssd_store_enable).cls">
+            {{ statusLabel(s?.ssd_store_enable).text }}
           </span>
         </div>
         <div class="status-row">
           <span class="label">SATA 连接</span>
-          <span class="badge" :class="props.status.sata_dev_identify_done === 1 ? 'status-on' : 'status-off'">
-            {{ props.status.sata_dev_identify_done === 1 ? "已连接" : "未连接" }}
+          <span class="badge" :class="sataClass(s?.sata_dev_identify_done)">
+            {{ sataText(s?.sata_dev_identify_done) }}
           </span>
         </div>
         <div class="status-row">
           <span class="label">硬盘容量</span>
-          <span class="value mono">{{ formatDiskSize(props.status.sata_dev_tot_sec_num) }}</span>
+          <span class="value mono">{{ formatDiskSize(s?.sata_dev_tot_sec_num) }}</span>
         </div>
       </div>
     </section>
@@ -321,51 +345,49 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <div class="row-list">
         <div class="status-row">
           <span class="label">经度</span>
-          <span class="value mono">{{ props.status.gps_longitude.toFixed(6) }}°</span>
+          <span class="value mono">{{ fmtFixed(s?.gps_longitude, 6) }}°</span>
         </div>
         <div class="status-row">
           <span class="label">纬度</span>
-          <span class="value mono">{{ props.status.gps_latitude.toFixed(6) }}°</span>
+          <span class="value mono">{{ fmtFixed(s?.gps_latitude, 6) }}°</span>
         </div>
         <div class="status-row">
           <span class="label">高度</span>
-          <span class="value mono">{{ props.status.gps_altitude.toFixed(2) }} m</span>
+          <span class="value mono">{{ fmtFixed(s?.gps_altitude, 2) }} m</span>
         </div>
       </div>
       <div class="attitude-grid">
         <div class="attitude">
           <span class="metric-label">方位角</span>
-          <span class="attitude-value">{{ fmt(props.status.gps_azimuth, 2) }}<i>°</i></span>
+          <span class="attitude-value">{{ fmt(s?.gps_azimuth, 2) }}<i>°</i></span>
         </div>
         <div class="attitude">
           <span class="metric-label">俯仰角</span>
-          <span class="attitude-value">{{ fmt(props.status.gps_pitch, 2) }}<i>°</i></span>
+          <span class="attitude-value">{{ fmt(s?.gps_pitch, 2) }}<i>°</i></span>
         </div>
         <div class="attitude">
           <span class="metric-label">横滚角</span>
-          <span class="attitude-value">{{ fmt(props.status.gps_roll, 2) }}<i>°</i></span>
+          <span class="attitude-value">{{ fmt(s?.gps_roll, 2) }}<i>°</i></span>
         </div>
       </div>
     </section>
-  </div>
-
-  <div v-else class="status-empty">
-    <div class="empty-icon">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-        stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="4" width="18" height="16" rx="3" />
-        <path d="M3 10h18M8 15h3" />
-        <circle cx="16.5" cy="15" r="1.5" />
-      </svg>
-    </div>
-    <p class="empty-title">等待设备连接</p>
-    <p class="empty-hint">搜索并连接采集卡后，此处显示实时状态</p>
   </div>
 </template>
 
 <style scoped>
 .status-panel {
   font-size: 13px;
+}
+
+.status-offline {
+  margin-bottom: 14px;
+  padding: 8px 10px;
+  background: var(--bg-inset);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  text-align: center;
 }
 
 .status-group {
@@ -604,46 +626,5 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
   border-radius: 50%;
   background: #e5484d;
   flex-shrink: 0;
-}
-
-/* 空状态 */
-.status-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 60px 20px;
-  text-align: center;
-}
-
-.empty-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  margin-bottom: 4px;
-  border-radius: 12px;
-  background: var(--bg-tertiary);
-  color: var(--text-tertiary);
-}
-
-.empty-icon svg {
-  width: 22px;
-  height: 22px;
-}
-
-.empty-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.empty-hint {
-  font-size: 11.5px;
-  color: var(--text-tertiary);
-  max-width: 260px;
-  line-height: 1.6;
 }
 </style>
