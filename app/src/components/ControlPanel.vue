@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { SsdFile } from "../types";
+import type { SsdFile, SystemStatus } from "../types";
 import StorageDrawer from "./StorageDrawer.vue";
 
 /** 通用命令按钮 Props */
 const props = defineProps<{
   connected: boolean;
   deviceIp?: string;
+  status?: SystemStatus | null;
 }>();
 
 // ===== 设备连接 =====
@@ -290,13 +291,47 @@ async function setDaChannel(channel: number) {
   }
 }
 
+// ===== 增益反馈（来自设备状态 0x0102） =====
+/** ADC 原始值 → 电压：16 位，满量程 5V */
+function adcVoltage(value: number | undefined): number {
+  return ((value ?? 0) / 65536) * 5;
+}
+
+/** APD 高压反馈换算系数：Vhv = Vadc * 293 * 0.798 */
+const APD_HV_COEFF = 293 * 0.798;
+
+/** 取状态中的 ADC 通道原始值 */
+function statusAdc(ch: number): number | undefined {
+  const s = props.status;
+  if (!s) return undefined;
+  return [s.adc_ch0, s.adc_ch1, s.adc_ch2, s.adc_ch3][ch];
+}
+
+function pmtFeedbackText(ch: number): string {
+  const v = statusAdc(ch);
+  return v === undefined ? "-" : adcVoltage(v).toFixed(3) + " V";
+}
+
+function apdFeedbackText(): string {
+  const v = statusAdc(3);
+  return v === undefined ? "-" : (adcVoltage(v) * APD_HV_COEFF).toFixed(1) + " V";
+}
+
+/** 增益页底部的四路反馈读数 */
+const feedbackItems = computed(() => [
+  { key: "pmt1", label: "PMT1 反馈", value: pmtFeedbackText(0), type: "pmt" },
+  { key: "pmt2", label: "PMT2 反馈", value: pmtFeedbackText(1), type: "pmt" },
+  { key: "pmt3", label: "PMT3 反馈", value: pmtFeedbackText(2), type: "pmt" },
+  { key: "apd", label: "APD 高压反馈", value: apdFeedbackText(), type: "apd" },
+]);
+
 // ===== Tab =====
 const activeTab = ref("capture");
 const tabs = [
-  { key: "capture", label: "采集参数" },
-  { key: "voltage", label: "电压" },
   { key: "laser", label: "激光器" },
   { key: "motor", label: "电机" },
+  { key: "voltage", label: "增益" },
+  { key: "capture", label: "采集参数" },
   { key: "storage", label: "存储" },
 ];
 
@@ -464,6 +499,19 @@ function selectTab(key: string) {
         </div>
 
         <p class="hint">ch0~ch2 = PMT0~2（0~5V），ch3 = APD 高压（140~300V）</p>
+      </section>
+
+      <section class="ctrl-group">
+        <h4 class="group-title">实时反馈</h4>
+        <div class="feedback-list">
+          <div v-for="item in feedbackItems" :key="item.key" class="feedback-row">
+            <span class="feedback-name">
+              <span class="ch-dot" :class="item.type"></span>{{ item.label }}
+            </span>
+            <span class="feedback-val">{{ item.value }}</span>
+          </div>
+        </div>
+        <p class="hint">反馈值随设备状态更新（约 1s 一次）。</p>
       </section>
     </div>
 
@@ -951,6 +999,41 @@ function selectTab(key: string) {
   font-size: 11px;
   line-height: 1.6;
   margin-top: 10px;
+}
+
+/* ---------- 增益实时反馈 ---------- */
+.feedback-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.feedback-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 11px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.feedback-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.feedback-val {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ---------- 空状态 ---------- */

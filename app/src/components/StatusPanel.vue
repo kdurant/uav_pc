@@ -31,16 +31,12 @@ function fmtMotorSpeed(v: number | undefined): string {
   return (v / 60).toFixed(1);
 }
 
-/** ADC 通道标签 */
-const adcChannelLabels = [
-  "PMT1反馈",
-  "PMT2反馈",
-  "PMT3反馈",
-  "APD高压反馈",
-  "外置热敏1",
-  "外置热敏2",
-  "板载热敏1",
-  "板载热敏2",
+/** 温度通道：ch4/5=外置热敏，ch6/7=板载热敏 */
+const thermistorChannels = [
+  { ch: 4, label: "外置热敏1" },
+  { ch: 5, label: "外置热敏2" },
+  { ch: 6, label: "板载热敏1" },
+  { ch: 7, label: "板载热敏2" },
 ];
 
 /** 获取 ADC 通道原始值 */
@@ -53,18 +49,8 @@ function adcValue(ch: number): number {
   return values[ch] ?? 0;
 }
 
-/** ADC 数字值 → 模拟电压：16 位，满量程 5V */
+/** ADC 数字值 → 比例（16 位满量程） */
 const ADC_FULL_SCALE = 65536;
-const ADC_VREF = 5.0;
-
-function adcVoltage(ch: number): number {
-  return (adcValue(ch) / ADC_FULL_SCALE) * ADC_VREF;
-}
-
-/** APD 高压反馈换算系数：Vhv = Vadc * 293 * 0.798 */
-const APD_HV_COEFF = 293 * 0.798;
-/** APD 高压反馈满量程电压（用于进度条归一化） */
-const APD_HV_FULL = ADC_VREF * APD_HV_COEFF;
 
 /** 热敏电阻通道编号（ch4/5=外置热敏1/2, ch6/7=板载热敏1/2） */
 const THERMISTOR_CHANNELS = [4, 5, 6, 7];
@@ -107,16 +93,11 @@ function adcBarColor(ch: number): string | undefined {
   return t === null ? "var(--error)" : tempColor(t);
 }
 
-/** ADC 通道显示文本：电压反馈显示电压，热敏电阻换算温度 */
+/** 热敏通道显示文本：换算温度，探头开路显示“开路” */
 function adcText(ch: number): string {
   if (!props.status) return "-";
-  if (ch <= 2) return adcVoltage(ch).toFixed(3) + " V"; // PMT1~3 反馈
-  if (ch === 3) return (adcVoltage(ch) * APD_HV_COEFF).toFixed(1) + " V"; // APD 高压反馈
-  if (THERMISTOR_CHANNELS.includes(ch)) {
-    const t = thermistorValues(ch);
-    return t ? t.temp.toFixed(2) + " °C" : "开路";
-  }
-  return String(adcValue(ch));
+  const t = thermistorValues(ch);
+  return t ? t.temp.toFixed(2) + " °C" : "开路";
 }
 
 /**
@@ -148,10 +129,9 @@ function adcTitle(ch: number): string | undefined {
   return `Vres=${t.vres.toFixed(4)} V, Rres=${t.rres.toFixed(0)} Ω, Temp=${t.temp.toFixed(2)} °C`;
 }
 
-/** ADC 通道进度条比例(0~1) */
+/** 热敏通道进度条比例(0~1) */
 function adcRatio(ch: number): number {
   if (!props.status) return 0;
-  if (ch === 3) return Math.min((adcVoltage(ch) * APD_HV_COEFF) / APD_HV_FULL, 1);
   return Math.min(adcValue(ch) / ADC_FULL_SCALE, 1);
 }
 
@@ -256,20 +236,20 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       </div>
     </section>
 
-    <!-- ADC 通道 -->
+    <!-- 热敏电阻 -->
     <section class="status-group">
-      <h4>ADC 通道</h4>
+      <h4>热敏电阻</h4>
       <div class="adc-list">
-        <div v-for="(label, i) in adcChannelLabels" :key="i" class="adc-row">
-          <span class="adc-label">{{ label }}</span>
+        <div v-for="item in thermistorChannels" :key="item.ch" class="adc-row">
+          <span class="adc-label">{{ item.label }}</span>
           <div class="adc-bar-wrap">
             <div
               class="adc-bar"
-              :style="{ width: adcRatio(i) * 100 + '%', background: adcBarColor(i) }"
+              :style="{ width: adcRatio(item.ch) * 100 + '%', background: adcBarColor(item.ch) }"
             ></div>
           </div>
-          <span class="adc-val" :title="adcTitle(i)" :style="{ color: adcValueColor(i) }">
-            {{ adcText(i) }}
+          <span class="adc-val" :title="adcTitle(item.ch)" :style="{ color: adcValueColor(item.ch) }">
+            {{ adcText(item.ch) }}
           </span>
         </div>
       </div>

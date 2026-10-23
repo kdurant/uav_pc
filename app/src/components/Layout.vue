@@ -182,6 +182,7 @@ handleSearch();
           <ControlPanel
             :connected="connectionState === ConnectionState.Connected"
             :device-ip="selectedDevice?.ip"
+            :status="status"
             @search="handleSearch"
             @disconnect="handleDisconnect"
             @toggle-status="handleToggleStatus"
