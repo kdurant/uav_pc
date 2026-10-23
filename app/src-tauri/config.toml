@@ -23,3 +23,9 @@ pin_threshold = 1000
 [gps]
 # GPS 数据文件所在目录（设备端路径），可用 0x0110 的 ls 查询
 dir = "/run/media/mmcblk1p1/"
+
+[temperature]
+# 历史温度文件最多保存的点数（每 10 秒记录一点，180 点约 30 分钟）
+save_points = 180
+# 温度曲线最多显示的点数
+display_points = 180

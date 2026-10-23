@@ -43,6 +43,30 @@ fn default_gps_dir() -> String {
     "/run/media/mmcblk1p1/".to_string()
 }
 
+/// 板载温度历史配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemperatureConfig {
+    /// 历史文件中最多保存的点数（每 10 秒一点）
+    #[serde(default = "default_temp_points")]
+    pub save_points: usize,
+    /// 曲线最多显示的点数
+    #[serde(default = "default_temp_points")]
+    pub display_points: usize,
+}
+
+fn default_temp_points() -> usize {
+    180
+}
+
+impl Default for TemperatureConfig {
+    fn default() -> Self {
+        Self {
+            save_points: default_temp_points(),
+            display_points: default_temp_points(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub basic: BasicConfig,
@@ -50,6 +74,9 @@ pub struct AppConfig {
     /// GPS 配置；老配置文件缺省时使用默认值
     #[serde(default)]
     pub gps: GpsConfig,
+    /// 板载温度历史配置；老配置文件缺省时使用默认值
+    #[serde(default)]
+    pub temperature: TemperatureConfig,
 }
 
 impl Default for BasicConfig {
@@ -88,6 +115,7 @@ impl Default for AppConfig {
             basic: BasicConfig::default(),
             capture: CaptureConfig::default(),
             gps: GpsConfig::default(),
+            temperature: TemperatureConfig::default(),
         }
     }
 }
@@ -149,6 +177,8 @@ pin_threshold = 1000
         let config: AppConfig = toml::from_str(&toml).unwrap();
         assert!(config.basic.broadcast_search);
         assert_eq!(config.basic.device_ip, "");
+        assert_eq!(config.temperature.save_points, 180);
+        assert_eq!(config.temperature.display_points, 180);
     }
 
     #[test]

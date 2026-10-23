@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { SystemStatus } from "../types";
+import { computed, onMounted, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import type { SystemStatus, TemperatureConfig, TemperaturePoint } from "../types";
+import TemperatureHistoryDialog from "./TemperatureHistoryDialog.vue";
 
 const props = defineProps<{
   status: SystemStatus | null;
@@ -8,6 +10,62 @@ const props = defineProps<{
 
 /** 方便模板安全访问 */
 const s = computed(() => props.status);
+
+// ===== 板载温度历史（每 10s 一点，文件持久化） =====
+const tempHistory = ref<TemperaturePoint[]>([]);
+const tempConfig = ref<TemperatureConfig>({ save_points: 180, display_points: 180 });
+const historyVisible = ref(false);
+const TEMP_SAMPLE_MS = 10_000;
+let lastTempSampleAt = 0;
+let savingHistory = false;
+
+/** 曲线显示最近 display_points 个点 */
+const visibleHistory = computed(() => {
+  const limit = Math.max(1, tempConfig.value.display_points);
+  const len = tempHistory.value.length;
+  return len <= limit ? tempHistory.value : tempHistory.value.slice(len - limit);
+});
+
+onMounted(async () => {
+  try {
+    tempConfig.value = await invoke<TemperatureConfig>("get_temperature_config");
+    const saved = await invoke<TemperaturePoint[]>("load_temperature_history");
+    if (saved.length) {
+      tempHistory.value = saved;
+      lastTempSampleAt = saved[saved.length - 1].time;
+    }
+  } catch (e) {
+    console.error("load temperature history failed:", e);
+  }
+});
+
+watch(
+  () => props.status,
+  async (status) => {
+    // 断开连接时保留历史，仅停止采样
+    if (!status) return;
+
+    const now = Date.now();
+    if (lastTempSampleAt !== 0 && now - lastTempSampleAt < TEMP_SAMPLE_MS) return;
+    lastTempSampleAt = now;
+    tempHistory.value.push({ time: now, temp: status.i2c_temp });
+
+    const limit = Math.max(1, tempConfig.value.save_points);
+    if (tempHistory.value.length > limit) {
+      tempHistory.value.splice(0, tempHistory.value.length - limit);
+    }
+
+    if (savingHistory) return;
+    savingHistory = true;
+    try {
+      await invoke("save_temperature_history", { points: tempHistory.value });
+    } catch (e) {
+      console.error("save temperature history failed:", e);
+    } finally {
+      savingHistory = false;
+    }
+  }
+);
 
 /** 硬盘容量：单位 GB，按 1GB = 1024MB（1024³ 字节）换算 */
 function formatDiskSize(sectors: number | undefined): string {
@@ -201,7 +259,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
     <section class="status-group">
       <h4>环境参数</h4>
       <div class="metric-grid">
-        <div class="metric">
+        <div class="metric metric-clickable" title="点击查看最近 30 分钟温度曲线" @click="historyVisible = true">
           <span class="metric-label">板载温度</span>
           <span class="metric-value" :style="{ color: tempColor(s?.i2c_temp) }">
             {{ fmt(s?.i2c_temp, 1) }}<i>°C</i>
@@ -343,6 +401,12 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
         </div>
       </div>
     </section>
+
+    <TemperatureHistoryDialog
+      :visible="historyVisible"
+      :points="visibleHistory"
+      @close="historyVisible = false"
+    />
   </div>
 </template>
 
@@ -446,6 +510,16 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
   background: var(--bg-inset);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
+}
+
+.metric-clickable {
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.metric-clickable:hover {
+  border-color: #bcd0f8;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
 }
 
 .metric-label {

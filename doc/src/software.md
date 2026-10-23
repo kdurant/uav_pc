@@ -34,6 +34,12 @@ second_len = 400
 sum_value = 0
 max_value = 0
 pin_threshold = 1000
+
+[temperature]
+# 历史温度文件最多保存的点数（每 10 秒一点，180 点约 30 分钟）
+save_points = 180
+# 温度曲线最多显示的点数
+display_points = 180
 ```
 
 
@@ -84,3 +90,8 @@ pin_threshold = 1000
 1. 重启：发送 0x0103（内容 0x01），设备约 25 秒后可重新连接
 2. 关机：发送 0x0104（内容 0x01），设备约 15 秒后完成关机
 3. 命令发出后上位机立即按断开处理，需重新搜索连接；操作前弹窗确认，执行中显示剩余时间
+
+## 板载温度历史
+1. 连接后每 10 秒记录一次板载温度，点击设备状态中的“板载温度”查看曲线
+2. 历史点保存到运行目录的 `temperature_history.json`，启动时自动加载
+3. `[temperature]` 的 `save_points` 控制文件保存点数，`display_points` 控制曲线显示点数

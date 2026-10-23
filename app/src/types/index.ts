@@ -121,12 +121,27 @@ export interface LaserStatus {
     export_power: number;
 }
 
-/** 电机实时状态（对应 Rust MotorState） */
-export interface MotorState {
+/** 电机实时状态（对应 Rust MotorState） */export interface MotorState {
     /** 实际位置（编码器步数） */
     position: number;
     /** 实际速度（r/s） */
     velocity: number;
+}
+
+/** 历史温度采样点 */
+export interface TemperaturePoint {
+    /** 采样时间戳（ms） */
+    time: number;
+    /** 温度（℃） */
+    temp: number;
+}
+
+/** 温度历史配置 */
+export interface TemperatureConfig {
+    /** 历史文件最多保存的点数 */
+    save_points: number;
+    /** 曲线最多显示的点数 */
+    display_points: number;
 }
 
 /** SSD 已存储文件（对应 Rust SsdFile） */

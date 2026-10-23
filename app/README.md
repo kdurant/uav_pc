@@ -58,6 +58,19 @@ device_ip = ""
 - `broadcast_search`：`true` 通过 UDP 广播搜索局域网设备；`false` 跳过广播，直接使用 `device_ip` 通信（默认 `true`）
 - `device_ip`：`broadcast_search = false` 时使用的设备 IP 地址
 
+温度历史配置：
+
+```toml
+[temperature]
+save_points = 180
+display_points = 180
+```
+
+- `save_points`：历史温度文件最多保存的点数（每 10 秒一点，180 点约 30 分钟）
+- `display_points`：温度曲线最多显示的点数
+
+历史数据保存在运行目录的 `temperature_history.json`，启动时自动加载。
+
 ## 项目结构
 
 ```

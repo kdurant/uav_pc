@@ -21,3 +21,6 @@ build
 
 book
 target
+
+# 运行期生成的温度历史
+temperature_history.json

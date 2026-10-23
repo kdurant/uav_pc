@@ -3,7 +3,7 @@ use crate::laser::{self, LaserStatus};
 use crate::motor::{self, MotorState};
 use crate::network::UdpNetwork;
 use crate::protocol::{Frame, SourceAddr, DestAddr};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
@@ -53,8 +53,7 @@ const SSD_EMPTY_STOP: usize = 16;
 const SSD_DATA_START: u64 = 8192;
 
 /// 共享的网络状态
-pub struct NetworkState {
-    pub network: Option<Arc<UdpNetwork>>,
+pub struct NetworkState {    pub network: Option<Arc<UdpNetwork>>,
     pub connected_device: Option<SocketAddr>,
     pub seq_counter: u16,
     pub preview_enabled: bool,
@@ -79,6 +78,61 @@ async fn get_or_init_network(app: &AppHandle) -> Result<Arc<UdpNetwork>, String>
 }
 
 // ========== Tauri Commands ==========
+
+/// 历史温度采样点
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemperaturePoint {
+    /// 毫秒时间戳
+    pub time: u64,
+    /// 温度（℃）
+    pub temp: f64,
+}
+
+/// 温度历史文件（与 config.toml 同目录）
+const TEMP_HISTORY_FILE: &str = "temperature_history.json";
+
+/// 读取历史温度点；文件不存在或损坏时返回空列表
+#[tauri::command]
+pub async fn load_temperature_history(app: AppHandle) -> Result<Vec<TemperaturePoint>, String> {
+    let save_points = {
+        let config = app.state::<AppConfig>();
+        config.temperature.save_points.max(1)
+    };
+    let Ok(text) = std::fs::read_to_string(TEMP_HISTORY_FILE) else {
+        return Ok(Vec::new());
+    };
+    let mut points: Vec<TemperaturePoint> = serde_json::from_str(&text).unwrap_or_default();
+    let start = points.len().saturating_sub(save_points);
+    points.drain(..start);
+    log::info!(
+        "Loaded {} temperature history points from {}",
+        points.len(),
+        TEMP_HISTORY_FILE
+    );
+    Ok(points)
+}
+
+/// 保存历史温度点（按 save_points 裁剪后整体写入）
+#[tauri::command]
+pub async fn save_temperature_history(
+    app: AppHandle,
+    points: Vec<TemperaturePoint>,
+) -> Result<(), String> {
+    let save_points = {
+        let config = app.state::<AppConfig>();
+        config.temperature.save_points.max(1)
+    };
+    let start = points.len().saturating_sub(save_points);
+    let kept = &points[start..];
+    let text = serde_json::to_string(kept).map_err(|e| format!("序列化温度历史失败: {}", e))?;
+    std::fs::write(TEMP_HISTORY_FILE, text).map_err(|e| format!("写入温度历史失败: {}", e))
+}
+
+/// 读取温度历史配置
+#[tauri::command]
+pub fn get_temperature_config(app: AppHandle) -> crate::config::TemperatureConfig {
+    app.state::<AppConfig>().temperature.clone()
+}
 
 /// 发现局域网内设备：发送 0x0100 广播，300ms 内收集响应设备；
 /// `[basic].broadcast_search = false` 时不广播，直接返回 `device_ip`
