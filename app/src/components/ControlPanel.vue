@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { SsdFile } from "../types";
+import StorageDrawer from "./StorageDrawer.vue";
 
 /** 通用命令按钮 Props */
 const props = defineProps<{
@@ -14,7 +15,6 @@ const emit = defineEmits<{
   (e: "search"): void;
   (e: "disconnect"): void;
   (e: "toggle-status", enable: boolean): void;
-  (e: "tab-change", tab: string): void;
 }>();
 
 const statusPollingEnabled = ref(true);
@@ -126,9 +126,15 @@ async function setStoreEnable() {
 const ssdFiles = ref<SsdFile[]>([]);
 const ssdLoading = ref(false);
 const ssdError = ref("");
+// 文件列表抽屉（左栏宽度固定，列表在抽屉中展示）
+const ssdDrawerVisible = ref(false);
+
+/** SSD 文件总大小 */
+const ssdTotalSize = computed(() => ssdFiles.value.reduce((sum, f) => sum + f.size, 0));
 
 async function refreshSsdFiles() {
   if (!props.connected || !props.deviceIp) return;
+  ssdDrawerVisible.value = true;
   ssdLoading.value = true;
   ssdError.value = "";
   try {
@@ -156,9 +162,14 @@ const gpsFiles = ref<string[]>([]);
 const gpsLoading = ref(false);
 const gpsError = ref("");
 const gpsQueried = ref(false);
+const gpsDrawerVisible = ref(false);
+
+/** GPS 文件名 → 抽屉条目 */
+const gpsDrawerFiles = computed(() => gpsFiles.value.map((name) => ({ name })));
 
 async function refreshGpsFiles() {
   if (!props.connected || !props.deviceIp) return;
+  gpsDrawerVisible.value = true;
   gpsLoading.value = true;
   gpsError.value = "";
   try {
@@ -245,7 +256,6 @@ const tabs = [
 
 function selectTab(key: string) {
   activeTab.value = key;
-  emit("tab-change", key);
 }
 </script>
 
@@ -481,29 +491,18 @@ function selectTab(key: string) {
         <button class="accent block" :disabled="ssdLoading" @click="refreshSsdFiles">
           {{ ssdLoading ? "检索中..." : "检索文件" }}
         </button>
+
         <p v-if="ssdError" class="ssd-error">{{ ssdError }}</p>
-        <div v-if="ssdFiles.length" class="ssd-table-wrap">
-          <table class="ssd-table">
-            <thead>
-              <tr>
-                <th class="col-name">文件名</th>
-                <th>起始</th>
-                <th>结束</th>
-                <th>大小</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="f in ssdFiles" :key="f.start + '-' + f.name">
-                <td class="col-name" :title="f.name">{{ f.name }}</td>
-                <td>{{ f.start }}</td>
-                <td>{{ f.end }}</td>
-                <td>{{ formatSize(f.size) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p v-else-if="!ssdLoading && !ssdError" class="ssd-empty">暂无文件，点击“检索文件”</p>
-        <p v-if="ssdFiles.length" class="ssd-unit">地址单位：扇区（512 B）</p>
+        <template v-else-if="ssdFiles.length">
+          <div class="file-summary">
+            <span class="summary-main">{{ ssdFiles.length }} 个文件</span>
+            <span class="summary-sub">合计 {{ formatSize(ssdTotalSize) }}</span>
+          </div>
+          <button class="block view-btn" @click="ssdDrawerVisible = true">查看文件列表</button>
+        </template>
+        <p v-else class="ssd-empty">暂无文件，点击“检索文件”</p>
+
+        <p class="ssd-unit">地址单位：扇区（512 B）</p>
       </section>
 
       <section class="ctrl-group">
@@ -514,27 +513,41 @@ function selectTab(key: string) {
         <button class="accent block" :disabled="gpsLoading" @click="refreshGpsFiles">
           {{ gpsLoading ? "检索中..." : "检索文件" }}
         </button>
+
         <p v-if="gpsError" class="ssd-error">{{ gpsError }}</p>
-        <div v-if="gpsFiles.length" class="ssd-table-wrap">
-          <table class="ssd-table">
-            <thead>
-              <tr>
-                <th class="col-name">文件名</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="f in gpsFiles" :key="f">
-                <td class="col-name" :title="f">{{ f }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p v-else-if="gpsQueried && !gpsLoading && !gpsError" class="ssd-empty">
-          无文件（或目录不存在）
-        </p>
+        <template v-else-if="gpsFiles.length">
+          <div class="file-summary">
+            <span class="summary-main">{{ gpsFiles.length }} 个文件</span>
+          </div>
+          <button class="block view-btn" @click="gpsDrawerVisible = true">查看文件列表</button>
+        </template>
+        <p v-else-if="gpsQueried" class="ssd-empty">无文件（或目录不存在）</p>
+
         <p class="ssd-unit">路径：/run/media/mmcblk1p1/（可在 config.toml [gps].dir 修改）</p>
       </section>
     </div>
+
+    <!-- 文件列表抽屉：左栏宽度固定，表格在抽屉中展示 -->
+    <StorageDrawer
+      :visible="ssdDrawerVisible"
+      title="SSD 已存储文件"
+      mode="ssd"
+      :loading="ssdLoading"
+      :error="ssdError"
+      :files="ssdFiles"
+      @close="ssdDrawerVisible = false"
+      @refresh="refreshSsdFiles"
+    />
+    <StorageDrawer
+      :visible="gpsDrawerVisible"
+      title="GPS 数据文件"
+      mode="gps"
+      :loading="gpsLoading"
+      :error="gpsError"
+      :files="gpsDrawerFiles"
+      @close="gpsDrawerVisible = false"
+      @refresh="refreshGpsFiles"
+    />
   </div>
 </template>
 
@@ -921,7 +934,7 @@ function selectTab(key: string) {
   color: var(--text-tertiary);
 }
 
-/* ---------- 文件表格 ---------- */
+/* ---------- 文件摘要（列表在抽屉中） ---------- */
 .ssd-error {
   color: var(--error);
   font-size: 11.5px;
@@ -929,6 +942,7 @@ function selectTab(key: string) {
   padding: 6px 9px;
   background: var(--error-soft);
   border-radius: var(--radius-xs);
+  word-break: break-all;
 }
 
 .ssd-empty {
@@ -948,59 +962,35 @@ function selectTab(key: string) {
   line-height: 1.5;
 }
 
-.ssd-table-wrap {
+.file-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   margin-top: 9px;
-  max-height: 300px;
-  overflow: auto;
+  padding: 8px 10px;
+  background: var(--bg-inset);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  background: #fff;
 }
 
-.ssd-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-}
-
-.ssd-table th,
-.ssd-table td {
-  padding: 6px 8px;
-  text-align: left;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--border-color);
+.summary-main {
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
-.ssd-table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-weight: 650;
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.ssd-table td {
-  font-variant-numeric: tabular-nums;
+.summary-sub {
+  font-size: 11px;
+  color: var(--text-tertiary);
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.ssd-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.ssd-table tbody tr:hover {
-  background: var(--bg-inset);
-}
-
-.ssd-table .col-name {
-  max-width: 170px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: inherit;
+.view-btn {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--accent-dim);
 }
 </style>

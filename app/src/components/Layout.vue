@@ -19,12 +19,6 @@ const connectionState = ref<ConnectionState>(ConnectionState.Disconnected);
 const showDeviceSelector = ref(false);
 const isConnecting = ref(false);
 
-// 控制面板当前 tab（存储 tab 需要更宽以显示文件表格）
-const controlTab = ref("capture");
-function handleTabChange(tab: string) {
-  controlTab.value = tab;
-}
-
 // 通道可见性
 const channelVisible = ref([true, true, true, true]);
 
@@ -179,7 +173,7 @@ handleSearch();
     <!-- Main content: three columns -->
     <div class="main-content">
       <!-- Left: Control Panel -->
-      <aside class="panel panel-left" :class="{ 'panel-left-wide': controlTab === 'storage' }">
+      <aside class="panel panel-left">
         <div class="panel-header">
           <span class="panel-title">控制面板</span>
           <span class="panel-tag">CONTROL</span>
@@ -191,7 +185,6 @@ handleSearch();
             @search="handleSearch"
             @disconnect="handleDisconnect"
             @toggle-status="handleToggleStatus"
-            @tab-change="handleTabChange"
           />
         </div>
       </aside>
@@ -440,11 +433,6 @@ handleSearch();
   flex-shrink: 0;
 }
 
-/* 存储 tab：左栏加宽以容纳 SSD 文件表格（不做宽度动画，避免整页重排 + 图表反复 resize） */
-.panel-left-wide {
-  width: 452px;
-}
-
 .panel-center {
   flex: 1;
   min-width: 380px;
@@ -537,10 +525,6 @@ handleSearch();
   .panel-right {
     width: 326px;
   }
-
-  .panel-left-wide {
-    width: 360px;
-  }
 }
 
 @media (max-width: 1080px) {
@@ -561,10 +545,6 @@ handleSearch();
   .panel-right {
     width: 306px;
     min-width: 280px;
-  }
-
-  .panel-left-wide {
-    width: 300px;
   }
 
   .panel-center {
