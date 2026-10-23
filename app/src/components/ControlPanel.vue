@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { SsdFile, SystemStatus } from "../types";
+import type { LaserStatus, MotorState, SsdFile, SystemStatus } from "../types";
 import StorageDrawer from "./StorageDrawer.vue";
 
 /** 通用命令按钮 Props */
@@ -24,18 +24,160 @@ function toggleStatusPolling() {
   emit("toggle-status", statusPollingEnabled.value);
 }
 
-// ===== 激光器控制 =====
-const laserFreq = ref(1000);
+// ===== 激光器控制（0x0200 透传 / 0x0201 重频） =====
+const laserFreq = ref(20000);
 const laserEnabled = ref(false);
+const laserMode = ref(1); // 0 内触发，1 外触发
+const laserCurrent = ref(1000);
+const laserStatus = ref<LaserStatus | null>(null);
+const laserBusy = ref(false);
+const laserError = ref("");
+
+async function laserAction(action: string, value?: number): Promise<boolean> {
+  if (!props.connected || !props.deviceIp) return false;
+  laserBusy.value = true;
+  laserError.value = "";
+  try {
+    const status = await invoke<LaserStatus | null>("laser_command", {
+      deviceIp: props.deviceIp,
+      action,
+      value,
+    });
+    if (status) laserStatus.value = status;
+    return true;
+  } catch (e) {
+    laserError.value = String(e);
+    console.error(`laser_command ${action} failed:`, e);
+    return false;
+  } finally {
+    laserBusy.value = false;
+  }
+}
 
 async function setLaserFreq() {
-  if (!props.connected || !props.deviceIp) return;
-  await sendParam(0x0201, laserFreq.value);
+  await laserAction("freq", Math.trunc(laserFreq.value));
 }
+
+/** 电源开关：打开后立即重设电流（激光器关闭会把内部电流清零） */
 async function toggleLaser() {
-  if (!props.connected || !props.deviceIp) return;
-  await sendParam(0x0202, laserEnabled.value ? 1 : 0);
+  const target = laserEnabled.value;
+  if (target) {
+    const opened = await laserAction("open");
+    if (!opened) {
+      laserEnabled.value = false;
+      return;
+    }
+    // 打开成功但电流设置失败时保持开启状态，便于用户直接重试
+    await laserAction("current", Math.trunc(laserCurrent.value));
+  } else {
+    const closed = await laserAction("close");
+    if (!closed) laserEnabled.value = true;
+  }
 }
+
+/** 模式切换：失败时回滚 */
+async function setLaserMode(mode: number) {
+  const prev = laserMode.value;
+  laserMode.value = mode;
+  const ok = await laserAction("mode", mode);
+  if (!ok) laserMode.value = prev;
+}
+
+async function setLaserCurrent() {
+  await laserAction("current", Math.trunc(laserCurrent.value));
+}
+
+async function queryLaserStatus() {
+  const ok = await laserAction("status");
+  if (ok && laserStatus.value) {
+    // 用设备回报的开关状态校正界面
+    laserEnabled.value = laserStatus.value.status !== 0;
+  }
+}
+
+const laserStatusItems = computed(() => {
+  const s = laserStatus.value;
+  if (!s) return [];
+  return [
+    { label: "开关状态", value: s.status === 0 ? "关闭" : "开启" },
+    { label: "错误码", value: `0x${s.error_code.toString(16).padStart(2, "0")}` },
+    { label: "箱体温度", value: `${s.box_temp.toFixed(1)} ℃` },
+    { label: "泵浦1温度", value: `${s.pump1_temp.toFixed(1)} ℃` },
+    { label: "泵浦2温度", value: `${s.pump2_temp.toFixed(1)} ℃` },
+    { label: "泵浦1电流", value: `${s.pump1_current} mA` },
+    { label: "泵浦2电流", value: `${s.pump2_current} mA` },
+    { label: "输出功率", value: `${(s.export_power / 1000).toFixed(2)} W` },
+  ];
+});
+
+// ===== 电机控制（0x0f00 透传） =====
+const motorBusy = ref(false);
+const motorError = ref("");
+const motorState = ref<MotorState | null>(null);
+const motorSpeed = ref(100); // r/s
+const motorTargetPos = ref(0);
+const motorHomeMethod = ref(34);
+
+async function motorAction(action: string, value?: number): Promise<boolean> {
+  if (!props.connected || !props.deviceIp) return false;
+  motorBusy.value = true;
+  motorError.value = "";
+  try {
+    const state = await invoke<MotorState | null>("motor_command", {
+      deviceIp: props.deviceIp,
+      action,
+      value,
+    });
+    if (state) motorState.value = state;
+    return true;
+  } catch (e) {
+    motorError.value = String(e);
+    console.error(`motor_command ${action} failed:`, e);
+    return false;
+  } finally {
+    motorBusy.value = false;
+  }
+}
+
+async function initMotor() {
+  await motorAction("init");
+}
+
+async function runMotor() {
+  await motorAction("run", Math.trunc(motorSpeed.value));
+}
+
+async function stopMotor() {
+  await motorAction("stop");
+}
+
+async function moveMotor() {
+  await motorAction("move_to", Math.trunc(motorTargetPos.value));
+}
+
+async function homeMotor() {
+  await motorAction("home", Math.trunc(motorHomeMethod.value));
+}
+
+async function stopHoming() {
+  await motorAction("home_stop");
+}
+
+async function refreshMotorState() {
+  await motorAction("read");
+}
+
+/** 断开连接时清空设备侧读数 */
+watch(
+  () => props.connected,
+  (connected) => {
+    if (connected) return;
+    laserStatus.value = null;
+    motorState.value = null;
+    laserError.value = "";
+    motorError.value = "";
+  }
+);
 
 // ===== 采集控制 =====
 const previewEnabled = ref(false);
@@ -518,43 +660,152 @@ function selectTab(key: string) {
     <!-- Tab Content: 激光器 -->
     <div v-show="activeTab === 'laser'" class="tab-content">
       <section class="ctrl-group">
-        <h4 class="group-title">激光器</h4>
+        <h4 class="group-title">激光器参数</h4>
+
         <div class="field-list">
           <div class="field">
             <span class="field-label">重频 (Hz)</span>
             <div class="field-inline">
-              <input type="number" v-model.number="laserFreq" min="1" />
-              <button class="set-btn" @click="setLaserFreq">设置</button>
+              <input type="number" v-model.number="laserFreq" min="1" max="100000" :disabled="laserBusy" />
+              <button class="set-btn" :disabled="laserBusy" @click="setLaserFreq">设置</button>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">电流 (mA)</span>
+            <div class="field-inline">
+              <input type="number" v-model.number="laserCurrent" min="0" max="6000" :disabled="laserBusy" />
+              <button class="set-btn" :disabled="laserBusy" @click="setLaserCurrent">设置</button>
             </div>
           </div>
         </div>
 
+        <div class="field">
+          <span class="field-label">工作模式</span>
+          <div class="mode-grid">
+            <label class="mode-pill" :class="{ active: laserMode === 0 }">
+              <input
+                type="radio"
+                name="laserMode"
+                :value="0"
+                v-model.number="laserMode"
+                :disabled="laserBusy"
+                @change="setLaserMode(0)"
+              />
+              <span>内触发</span>
+            </label>
+            <label class="mode-pill" :class="{ active: laserMode === 1 }">
+              <input
+                type="radio"
+                name="laserMode"
+                :value="1"
+                v-model.number="laserMode"
+                :disabled="laserBusy"
+                @change="setLaserMode(1)"
+              />
+              <span>外触发</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="ctrl-group">
+        <h4 class="group-title">激光器状态</h4>
         <div class="switch-row card-row">
           <span class="switch-row-label">
             激光使能
             <i class="switch-hint">{{ laserEnabled ? '已开启' : '已关闭' }}</i>
           </span>
           <label class="switch">
-            <input type="checkbox" v-model="laserEnabled" @change="toggleLaser" />
+            <input type="checkbox" v-model="laserEnabled" :disabled="laserBusy" @change="toggleLaser" />
             <span class="switch-track"><span class="switch-thumb"></span></span>
           </label>
         </div>
+
+        <button class="accent block status-query" :disabled="laserBusy" @click="queryLaserStatus">
+          {{ laserBusy ? "查询中..." : "查询状态" }}
+        </button>
+
+        <div v-if="laserStatusItems.length" class="feedback-list">
+          <div v-for="item in laserStatusItems" :key="item.label" class="feedback-row">
+            <span class="feedback-name">{{ item.label }}</span>
+            <span class="feedback-val">{{ item.value }}</span>
+          </div>
+        </div>
+        <p v-else class="hint">点击“查询状态”读取激光器温度、电流与输出功率。</p>
+
+        <p v-if="laserError" class="ssd-error">{{ laserError }}</p>
+        <p class="hint">激光器命令经采集卡透传，单次操作最长等待 1 秒；打开时会自动重新下发电流。</p>
       </section>
     </div>
 
     <!-- Tab Content: 电机 -->
     <div v-show="activeTab === 'motor'" class="tab-content">
-      <div class="empty-hint">
-        <div class="empty-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-            stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3.2" />
-            <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
-          </svg>
+      <section class="ctrl-group">
+        <h4 class="group-title">电机状态</h4>
+        <div class="feedback-list">
+          <div class="feedback-row">
+            <span class="feedback-name">实际位置</span>
+            <span class="feedback-val">{{ motorState ? motorState.position : "-" }}</span>
+          </div>
+          <div class="feedback-row">
+            <span class="feedback-name">实际速度</span>
+            <span class="feedback-val">{{ motorState ? motorState.velocity + " r/s" : "-" }}</span>
+          </div>
         </div>
-        <p class="empty-title">电机控制</p>
-        <p class="empty-desc">功能开发中，暂无可调参数</p>
-      </div>
+        <button class="block" :disabled="motorBusy" @click="refreshMotorState">
+          {{ motorBusy ? "读取中..." : "刷新状态" }}
+        </button>
+      </section>
+
+      <section class="ctrl-group">
+        <h4 class="group-title">驱动器</h4>
+        <button class="accent block" :disabled="motorBusy" @click="initMotor">
+          {{ motorBusy ? "执行中..." : "初始化驱动器" }}
+        </button>
+        <p class="hint">初始化依次下发故障复位、关机、暂停与速度模式参数。</p>
+      </section>
+
+      <section class="ctrl-group">
+        <h4 class="group-title">速度模式</h4>
+        <div class="field-list">
+          <label class="field">
+            <span class="field-label">目标速度 (r/s)</span>
+            <input type="number" v-model.number="motorSpeed" min="0" max="3571" />
+          </label>
+        </div>
+        <div class="btn-row">
+          <button class="accent" :disabled="motorBusy" @click="runMotor">运行</button>
+          <button :disabled="motorBusy" @click="stopMotor">停止</button>
+        </div>
+      </section>
+
+      <section class="ctrl-group">
+        <h4 class="group-title">位置模式</h4>
+        <div class="field-list">
+          <label class="field">
+            <span class="field-label">目标位置 (steps)</span>
+            <input type="number" v-model.number="motorTargetPos" />
+          </label>
+        </div>
+        <button class="block" :disabled="motorBusy" @click="moveMotor">绝对定位</button>
+      </section>
+
+      <section class="ctrl-group">
+        <h4 class="group-title">回零</h4>
+        <div class="field-list">
+          <label class="field">
+            <span class="field-label">回零方法</span>
+            <input type="number" v-model.number="motorHomeMethod" min="0" max="35" />
+          </label>
+        </div>
+        <div class="btn-row">
+          <button :disabled="motorBusy" @click="homeMotor">开始回零</button>
+          <button :disabled="motorBusy" @click="stopHoming">停止回零</button>
+        </div>
+        <p class="hint">回零方法与驱动器配置需一致，默认 34。</p>
+      </section>
+
+      <p v-if="motorError" class="ssd-error">{{ motorError }}</p>
     </div>
 
     <!-- Tab Content: 存储 -->
@@ -719,6 +970,10 @@ function selectTab(key: string) {
   padding: 0 12px;
   font-size: 12.5px;
   flex-shrink: 0;
+}
+
+.status-query {
+  margin-top: 10px;
 }
 
 /* ---------- Tab 分段控件 ---------- */
@@ -886,6 +1141,12 @@ function selectTab(key: string) {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
+}
+
+/* 放在 .field 行内时占满剩余宽度（激光器工作模式为 2 项） */
+.field .mode-grid {
+  flex: 1;
+  grid-template-columns: repeat(2, 1fr);
 }
 
 .mode-pill {

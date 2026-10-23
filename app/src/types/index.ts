@@ -102,6 +102,33 @@ export interface AppConfig {
     };
 }
 
+/** 激光器实时状态（对应 Rust LaserStatus） */
+export interface LaserStatus {
+    /** 开关状态：0 关闭，其它为开启 */
+    status: number;
+    error_code: number;
+    /** 箱体温度（℃） */
+    box_temp: number;
+    /** 泵浦激光器 1 温度（℃） */
+    pump1_temp: number;
+    /** 泵浦激光器 2 温度（℃） */
+    pump2_temp: number;
+    /** 泵浦激光器 1 电流（mA） */
+    pump1_current: number;
+    /** 泵浦激光器 2 电流（mA） */
+    pump2_current: number;
+    /** 输出功率（mW） */
+    export_power: number;
+}
+
+/** 电机实时状态（对应 Rust MotorState） */
+export interface MotorState {
+    /** 实际位置（编码器步数） */
+    position: number;
+    /** 实际速度（r/s） */
+    velocity: number;
+}
+
 /** SSD 已存储文件（对应 Rust SsdFile） */
 export interface SsdFile {
     name: string;

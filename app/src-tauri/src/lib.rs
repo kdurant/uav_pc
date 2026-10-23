@@ -7,6 +7,8 @@ use tokio::sync::{broadcast, Mutex};
 
 mod commands;
 mod config;
+mod laser;
+mod motor;
 mod network;
 mod preview;
 mod protocol;
@@ -123,6 +125,7 @@ pub fn run() {
             seq_counter: 0,
             preview_enabled: false,
             frame_tx: frame_tx.clone(),
+            op_lock: Arc::new(tokio::sync::Mutex::new(())),
         })))
         .setup(move |app| {
             log::info!("UAV PC application started");
@@ -140,6 +143,8 @@ pub fn run() {
             commands::query_sys_status,
             commands::send_ref_channel,
             commands::send_command,
+            commands::laser_command,
+            commands::motor_command,
             commands::start_preview,
             commands::list_ssd_files,
             commands::set_ssd_store,
