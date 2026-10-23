@@ -66,8 +66,46 @@ const APD_HV_COEFF = 293 * 0.798;
 /** APD 高压反馈满量程电压（用于进度条归一化） */
 const APD_HV_FULL = ADC_VREF * APD_HV_COEFF;
 
-/** 板载热敏电阻通道编号（ch6=板载热敏1, ch7=板载热敏2） */
-const THERMISTOR_CHANNELS = [6, 7];
+/** 热敏电阻通道编号（ch4/5=外置热敏1/2, ch6/7=板载热敏1/2） */
+const THERMISTOR_CHANNELS = [4, 5, 6, 7];
+
+/** 高温阈值（°C），超过该值固定显示红色 */
+const TEMP_HIGH = 65;
+
+/**
+ * 温度色阶：0°C 蓝色 → 20°C 绿色 → 40°C 黄绿 → 55°C 橙色 → 65°C 红色。
+ * 超过 65°C 固定亮红色。
+ */
+function tempColor(t: number | null | undefined): string {
+  if (t === undefined || t === null || !Number.isFinite(t)) {
+    return "var(--text-primary)";
+  }
+  if (t > TEMP_HIGH) return "#dc2626";
+  const clamped = Math.max(0, t);
+  // 色相 210°(蓝) → 0°(红)
+  const hue = 210 - (clamped / TEMP_HIGH) * 210;
+  return `hsl(${hue.toFixed(0)}, 72%, 40%)`;
+}
+
+/** 热敏通道温度（开路/超量程返回 null） */
+function thermistorTemp(ch: number): number | null {
+  const t = thermistorValues(ch);
+  return t ? t.temp : null;
+}
+
+/** 热敏通道数值颜色：按温度渐变，开路时红色 */
+function adcValueColor(ch: number): string | undefined {
+  if (!THERMISTOR_CHANNELS.includes(ch)) return undefined;
+  const t = thermistorTemp(ch);
+  return t === null ? "var(--error)" : tempColor(t);
+}
+
+/** 热敏通道进度条颜色：与温度数值保持一致 */
+function adcBarColor(ch: number): string | undefined {
+  if (!THERMISTOR_CHANNELS.includes(ch)) return undefined;
+  const t = thermistorTemp(ch);
+  return t === null ? "var(--error)" : tempColor(t);
+}
 
 /** ADC 通道显示文本：电压反馈显示电压，热敏电阻换算温度 */
 function adcText(ch: number): string {
@@ -78,11 +116,11 @@ function adcText(ch: number): string {
     const t = thermistorValues(ch);
     return t ? t.temp.toFixed(2) + " °C" : "开路";
   }
-  return String(adcValue(ch)); // 外置热敏1/2（未连接）：保留原始值
+  return String(adcValue(ch));
 }
 
 /**
- * 板载热敏电阻换算（单位：V/Ω/℃）：
+ * 热敏电阻换算（外置/板载通用，单位：V/Ω/℃）：
  *   Vres = value * 0.0000625 * 1.051
  *   Rres = 10000 / (3.3 - Vres) * Vres
  *   Temp = 1 / (ln(Rres/10000)/3380 + 1/(273.15+25)) - 273.15 + 0.5
@@ -189,7 +227,9 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <div class="metric-grid">
         <div class="metric">
           <span class="metric-label">板载温度</span>
-          <span class="metric-value">{{ fmt(props.status.i2c_temp, 1) }}<i>°C</i></span>
+          <span class="metric-value" :style="{ color: tempColor(props.status.i2c_temp) }">
+            {{ fmt(props.status.i2c_temp, 1) }}<i>°C</i>
+          </span>
         </div>
         <div class="metric">
           <span class="metric-label">电机转速</span>
@@ -223,9 +263,14 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
         <div v-for="(label, i) in adcChannelLabels" :key="i" class="adc-row">
           <span class="adc-label">{{ label }}</span>
           <div class="adc-bar-wrap">
-            <div class="adc-bar" :style="{ width: adcRatio(i) * 100 + '%' }"></div>
+            <div
+              class="adc-bar"
+              :style="{ width: adcRatio(i) * 100 + '%', background: adcBarColor(i) }"
+            ></div>
           </div>
-          <span class="adc-val" :title="adcTitle(i)">{{ adcText(i) }}</span>
+          <span class="adc-val" :title="adcTitle(i)" :style="{ color: adcValueColor(i) }">
+            {{ adcText(i) }}
+          </span>
         </div>
       </div>
     </section>
