@@ -9,14 +9,6 @@ const props = defineProps<{
 /** 方便模板安全访问 */
 const s = computed(() => props.status);
 
-function formatUptime(seconds: number | undefined): string {
-  if (seconds === undefined) return "-";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
-
 /** 硬盘容量：单位 GB，按 1GB = 1024MB（1024³ 字节）换算 */
 function formatDiskSize(sectors: number | undefined): string {
   if (sectors === undefined) return "-";
@@ -54,10 +46,8 @@ function fmtMotorSpeed(v: number | undefined): string {
   return (v / 60).toFixed(1);
 }
 
-/** 温度通道：ch4/5=外置热敏，ch6/7=板载热敏 */
+/** 温度通道：ch6/7=板载热敏（外置热敏 ch4/5 不在界面显示） */
 const thermistorChannels = [
-  { ch: 4, label: "外置热敏1" },
-  { ch: 5, label: "外置热敏2" },
   { ch: 6, label: "板载热敏1" },
   { ch: 7, label: "板载热敏2" },
 ];
@@ -75,8 +65,8 @@ function adcValue(ch: number): number {
 /** ADC 数字值 → 比例（16 位满量程） */
 const ADC_FULL_SCALE = 65536;
 
-/** 热敏电阻通道编号（ch4/5=外置热敏1/2, ch6/7=板载热敏1/2） */
-const THERMISTOR_CHANNELS = [4, 5, 6, 7];
+/** 热敏电阻通道编号（仅板载热敏 ch6/7） */
+const THERMISTOR_CHANNELS = [6, 7];
 
 /** 高温阈值（°C），超过该值固定显示红色 */
 const TEMP_HIGH = 65;
@@ -191,24 +181,6 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 <template>
   <div class="status-panel">
     <div v-if="!s" class="status-offline">设备未连接，以下为占位数据</div>
-    <!-- 设备信息 -->
-    <section class="status-group">
-      <h4>设备信息</h4>
-      <div class="row-list">
-        <div class="status-row">
-          <span class="label">设备SN</span>
-          <span class="value mono">{{ s?.device_sn || "-" }}</span>
-        </div>
-        <div class="status-row">
-          <span class="label">设备类型</span>
-          <span class="value">{{ s?.device_type || "-" }}</span>
-        </div>
-        <div class="status-row">
-          <span class="label">运行时间</span>
-          <span class="value mono">{{ formatUptime(s?.uptime) }}</span>
-        </div>
-      </div>
-    </section>
 
     <!-- 版本 -->
     <section class="status-group">
@@ -391,7 +363,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 }
 
 .status-group {
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .status-group:last-child {

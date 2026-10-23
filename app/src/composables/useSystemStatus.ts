@@ -6,22 +6,66 @@ export function useSystemStatus() {
     const status = ref<SystemStatus | null>(null);
     const lastUpdate = ref<number>(0);
     const isActive = ref(false);
-    /** 超过 STATUS_TIMEOUT_MS 未收到设备状态上传 */
+    /** 设备运行时间（uptime）连续多次采样未增长 */
     const stale = ref(false);
 
     let unlistenFn: (() => void) | null = null;
     let watchdogTimer: number | null = null;
 
-    /** 设备状态上传超时时间（ms） */
-    const STATUS_TIMEOUT_MS = 3000;
-    const WATCHDOG_INTERVAL_MS = 500;
+    /** uptime 采样周期（ms） */
+    const STATUS_SAMPLE_MS = 1000;
+    /** uptime 连续多少次未增长判定为中断 */
+    const STALE_SAMPLE_COUNT = 3;
 
+    /** 上次观察到的 uptime 及连续未增长次数 */
+    let lastUptime: number | null = null;
+    let unchangedSamples = 0;
+
+    function resetUptimeBaseline() {
+        lastUptime = null;
+        unchangedSamples = 0;
+    }
+
+    /**
+     * 每秒采样一次设备运行时间：
+     * - 增加：设备状态正常，清除中断标记
+     * - 相同：累计未增长次数，达到 3 次判定中断
+     * - 回退：设备重启，重置基准并视为正常
+     * - 从未收到状态：同样按未增长累计
+     */
     function startWatchdog() {
         if (watchdogTimer !== null) return;
         watchdogTimer = window.setInterval(() => {
             if (!isActive.value) return;
-            stale.value = Date.now() - lastUpdate.value > STATUS_TIMEOUT_MS;
-        }, WATCHDOG_INTERVAL_MS);
+
+            const uptime = status.value?.uptime;
+            if (uptime === undefined) {
+                unchangedSamples++;
+                if (unchangedSamples >= STALE_SAMPLE_COUNT) stale.value = true;
+                return;
+            }
+
+            if (lastUptime === null) {
+                lastUptime = uptime;
+                unchangedSamples = 0;
+                stale.value = false;
+                return;
+            }
+
+            if (uptime > lastUptime) {
+                lastUptime = uptime;
+                unchangedSamples = 0;
+                stale.value = false;
+            } else if (uptime === lastUptime) {
+                unchangedSamples++;
+                if (unchangedSamples >= STALE_SAMPLE_COUNT) stale.value = true;
+            } else {
+                // 设备重启后 uptime 归零/回退，按重新开始处理
+                lastUptime = uptime;
+                unchangedSamples = 0;
+                stale.value = false;
+            }
+        }, STATUS_SAMPLE_MS);
     }
 
     function stopWatchdog() {
@@ -32,17 +76,23 @@ export function useSystemStatus() {
     }
 
     async function start() {
-        if (isActive.value) return;
+        // 重复调用（如重新连接同一设备）时重置计时与 uptime 基准，
+        // 避免沿用上一次的中断状态
+        if (isActive.value) {
+            lastUpdate.value = Date.now();
+            resetUptimeBaseline();
+            stale.value = false;
+            return;
+        }
         isActive.value = true;
 
         unlistenFn = await listen<SystemStatus>("sys-status-update", (event) => {
             status.value = event.payload;
             lastUpdate.value = Date.now();
-            stale.value = false;
         });
 
-        // 启用后开始计时，3 秒内没有数据即判定为中断
-        lastUpdate.value = Date.now();
+        // 启用后开始采样，由 uptime 是否增长判定连接状态
+        resetUptimeBaseline();
         stale.value = false;
         startWatchdog();
     }
@@ -57,6 +107,7 @@ export function useSystemStatus() {
         status.value = null;
         stale.value = false;
         lastUpdate.value = 0;
+        resetUptimeBaseline();
     }
 
     onUnmounted(() => {

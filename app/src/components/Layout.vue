@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useDeviceDiscovery } from "../composables/useDeviceDiscovery";
 import { useSystemStatus } from "../composables/useSystemStatus";
@@ -32,7 +32,22 @@ function pushPreviewFrame(series: number[][]) {
 
 const previewOutput = usePreviewData(pushPreviewFrame);
 
+/** 连接中断标记：状态数据中断后置位，收到新状态或重新连接后清除 */
+const linkLost = ref(false);
+
+watch(statusStale, (stale) => {
+  if (stale) {
+    linkLost.value = true;
+  } else if (connectionState.value === ConnectionState.Connected && status.value) {
+    // 只有收到新的状态数据才恢复；关闭状态读取（status 被清空）时保持中断标记
+    linkLost.value = false;
+  }
+});
+
 const statusLabel = computed(() => {
+  if (linkLost.value) {
+    return `连接中断: ${selectedDevice.value?.ip ?? ""}`;
+  }
   switch (connectionState.value) {
     case ConnectionState.Searching:
       return "搜索中...";
@@ -45,6 +60,7 @@ const statusLabel = computed(() => {
 
 /** 连接状态胶囊样式 */
 const connectionClass = computed(() => {
+  if (linkLost.value) return "is-lost";
   switch (connectionState.value) {
     case ConnectionState.Connected:
       return "is-connected";
@@ -56,6 +72,7 @@ const connectionClass = computed(() => {
 });
 
 async function handleSearch() {
+  linkLost.value = false;
   connectionState.value = ConnectionState.Searching;
   await searchDevices();
 
@@ -82,6 +99,7 @@ async function handleConnect(device: (typeof devices.value)[0]) {
       enable: true,
     });
     connectionState.value = ConnectionState.Connected;
+    linkLost.value = false;
     startStatus();
     previewOutput.start();
   } catch (err) {
@@ -124,6 +142,7 @@ async function handleDisconnect() {
     }
   }
   clearSelection();
+  linkLost.value = false;
   connectionState.value = ConnectionState.Disconnected;
 }
 
@@ -154,21 +173,15 @@ handleSearch();
           <span class="conn-label">{{ statusLabel }}</span>
         </div>
         <button
-          v-if="connectionState !== ConnectionState.Connected"
+          v-if="connectionState !== ConnectionState.Connected || linkLost"
           class="accent"
           :disabled="isSearching || isConnecting"
           @click="handleSearch"
         >
-          {{ isSearching ? "搜索中..." : "搜索设备" }}
+          {{ isSearching ? "搜索中..." : linkLost ? "重新搜索" : "搜索设备" }}
         </button>
       </div>
     </header>
-
-    <!-- 设备状态中断告警：3 秒未收到状态上传 -->
-    <div v-if="statusStale" class="status-alert">
-      <span class="alert-icon">!</span>
-      <span>设备状态数据中断：已超过 3 秒未收到设备上传</span>
-    </div>
 
     <!-- Main content: three columns -->
     <div class="main-content">
@@ -357,51 +370,24 @@ handleSearch();
   animation: dot-pulse 1.1s ease-in-out infinite;
 }
 
+/* 已连接但状态数据中断 */
+.conn-pill.is-lost {
+  background: var(--error-soft);
+  border-color: #f7d4d4;
+  color: #b42318;
+}
+
+.conn-pill.is-lost .conn-dot {
+  background: #e5484d;
+  box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.14);
+}
+
 @keyframes dot-pulse {
   0%, 100% {
     box-shadow: 0 0 0 0 rgba(224, 140, 26, 0.45);
   }
   50% {
     box-shadow: 0 0 0 4px rgba(224, 140, 26, 0);
-  }
-}
-
-/* ---------- 中断告警 ---------- */
-.status-alert {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  flex-shrink: 0;
-  margin: 10px 14px 0;
-  padding: 9px 14px;
-  background: var(--error-soft);
-  border: 1px solid #f7cfcf;
-  border-radius: var(--radius);
-  color: #b42318;
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  animation: alert-blink 1.8s ease-in-out infinite;
-}
-
-.alert-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #e5484d;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-@keyframes alert-blink {
-  50% {
-    opacity: 0.65;
   }
 }
 

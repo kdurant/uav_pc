@@ -20,6 +20,15 @@ const emit = defineEmits<{
 
 const statusPollingEnabled = ref(true);
 
+/** 运行时间：秒 → HH:MM:SS，无数据显示 "-" */
+function formatUptime(seconds: number | undefined): string {
+  if (seconds === undefined) return "-";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const sec = seconds % 60;
+  return [h, m, sec].map((v) => String(v).padStart(2, "0")).join(":");
+}
+
 function toggleStatusPolling() {
   emit("toggle-status", statusPollingEnabled.value);
 }
@@ -501,6 +510,25 @@ function selectTab(key: string) {
           </label>
         </div>
       </template>
+
+      <div class="device-meta">
+        <div class="device-meta-row">
+          <span class="k">SN</span>
+          <span class="v mono" :title="status?.device_sn || '-'">
+            {{ status?.device_sn || "-" }}
+          </span>
+        </div>
+        <div class="device-meta-row">
+          <span class="k">设备类型</span>
+          <span class="v" :title="status?.device_type || '-'">
+            {{ status?.device_type || "-" }}
+          </span>
+        </div>
+        <div class="device-meta-row">
+          <span class="k">运行时间</span>
+          <span class="v mono">{{ formatUptime(status?.uptime) }}</span>
+        </div>
+      </div>
     </section>
 
     <!-- Tab Bar -->
@@ -922,6 +950,42 @@ function selectTab(key: string) {
 
 .ctrl-group:last-child {
   margin-bottom: 4px;
+}
+
+/* 设备信息（连接组底部） */
+.device-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.device-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+}
+
+.device-meta-row .k {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.device-meta-row .v {
+  color: var(--text-secondary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-meta-row .v.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .group-title {
