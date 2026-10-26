@@ -2,11 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ref, onUnmounted } from "vue";
 import type { DiscoveredDevice } from "../types";
+import { useToast } from "./useToast";
 
 export function useDeviceDiscovery() {
     const devices = ref<DiscoveredDevice[]>([]);
     const isSearching = ref(false);
     const selectedDevice = ref<DiscoveredDevice | null>(null);
+    const toast = useToast();
 
     async function searchDevices() {
         isSearching.value = true;
@@ -16,6 +18,7 @@ export function useDeviceDiscovery() {
             devices.value = result;
         } catch (err) {
             console.error("Device discovery failed:", err);
+            toast.error("设备搜索失败", String(err));
         } finally {
             isSearching.value = false;
         }

@@ -2,11 +2,24 @@
 import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { LaserStatus } from "../../types";
+import { useToast } from "../../composables/useToast";
 
 const props = defineProps<{
   connected: boolean;
   deviceIp?: string;
 }>();
+
+const toast = useToast();
+
+/** 命令动作 → 中文提示名，用于失败通知 */
+const LASER_ACTION_LABELS: Record<string, string> = {
+  open: "打开激光器",
+  close: "关闭激光器",
+  freq: "设置重频",
+  current: "设置电流",
+  mode: "设置触发模式",
+  status: "查询状态",
+};
 
 // ===== 激光器控制（0x0200 透传 / 0x0201 重频） =====
 const laserFreq = ref(20000);
@@ -15,12 +28,10 @@ const laserMode = ref(1); // 0 内触发，1 外触发
 const laserCurrent = ref(1000);
 const laserStatus = ref<LaserStatus | null>(null);
 const laserBusy = ref(false);
-const laserError = ref("");
 
 async function laserAction(action: string, value?: number): Promise<boolean> {
   if (!props.connected || !props.deviceIp) return false;
   laserBusy.value = true;
-  laserError.value = "";
   try {
     const status = await invoke<LaserStatus | null>("laser_command", {
       deviceIp: props.deviceIp,
@@ -30,8 +41,11 @@ async function laserAction(action: string, value?: number): Promise<boolean> {
     if (status) laserStatus.value = status;
     return true;
   } catch (e) {
-    laserError.value = String(e);
     console.error(`laser_command ${action} failed:`, e);
+    toast.error(
+      `${LASER_ACTION_LABELS[action] ?? action}失败`,
+      String(e)
+    );
     return false;
   } finally {
     laserBusy.value = false;
@@ -82,7 +96,6 @@ watch(
   (connected) => {
     if (!connected) {
       laserStatus.value = null;
-      laserError.value = "";
     }
   }
 );
@@ -180,7 +193,6 @@ const laserStatusItems = computed(() => {  const s = laserStatus.value;
         </div>
       </div>
 
-      <p v-if="laserError" class="ssd-error">{{ laserError }}</p>
       <p class="hint">未查询或未连接时显示占位值；点击“查询状态”刷新读数。</p>
       <p class="hint">激光器命令经采集卡透传，单次操作最长等待 1 秒；打开时会自动重新下发电流。</p>
     </section>

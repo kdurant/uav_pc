@@ -488,15 +488,6 @@
 }
 
 /* ---------- 文件摘要（列表在抽屉中） ---------- */
-.ssd-error {
-  color: var(--error);
-  font-size: 11.5px;
-  margin-top: 8px;
-  padding: 6px 9px;
-  background: var(--error-soft);
-  border-radius: var(--radius-xs);
-  word-break: break-all;
-}
 
 .ssd-empty {
   color: var(--text-tertiary);

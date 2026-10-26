@@ -2,15 +2,28 @@
 import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { MotorState } from "../../types";
+import { useToast } from "../../composables/useToast";
 
 const props = defineProps<{
   connected: boolean;
   deviceIp?: string;
 }>();
 
+const toast = useToast();
+
+/** 命令动作 → 中文提示名，用于失败通知 */
+const MOTOR_ACTION_LABELS: Record<string, string> = {
+  init: "初始化",
+  run: "启动",
+  stop: "停止",
+  move_to: "移动到目标位置",
+  home: "开始回零",
+  home_stop: "停止回零",
+  read: "读取状态",
+};
+
 // ===== 电机控制（0x0f00 透传） =====
 const motorBusy = ref(false);
-const motorError = ref("");
 const motorState = ref<MotorState | null>(null);
 const motorSpeed = ref(100); // r/s
 const motorTargetPos = ref(0);
@@ -19,7 +32,6 @@ const motorHomeMethod = ref(34);
 async function motorAction(action: string, value?: number): Promise<boolean> {
   if (!props.connected || !props.deviceIp) return false;
   motorBusy.value = true;
-  motorError.value = "";
   try {
     const state = await invoke<MotorState | null>("motor_command", {
       deviceIp: props.deviceIp,
@@ -29,8 +41,11 @@ async function motorAction(action: string, value?: number): Promise<boolean> {
     if (state) motorState.value = state;
     return true;
   } catch (e) {
-    motorError.value = String(e);
     console.error(`motor_command ${action} failed:`, e);
+    toast.error(
+      `电机${MOTOR_ACTION_LABELS[action] ?? action}失败`,
+      String(e)
+    );
     return false;
   } finally {
     motorBusy.value = false;
@@ -71,7 +86,6 @@ watch(
   (connected) => {
     if (!connected) {
       motorState.value = null;
-      motorError.value = "";
     }
   }
 );
@@ -143,7 +157,5 @@ watch(
       </div>
       <p class="hint">回零方法与驱动器配置需一致，默认 34。</p>
     </section>
-
-    <p v-if="motorError" class="ssd-error">{{ motorError }}</p>
   </div>
 </template>

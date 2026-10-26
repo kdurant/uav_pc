@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "../../composables/useToast";
 
 const props = defineProps<{
   connected: boolean;
   deviceIp?: string;
 }>();
+
+const toast = useToast();
 
 // ===== 采集控制 =====
 const previewEnabled = ref(false);
@@ -21,13 +24,17 @@ const settingInProgress = ref(false);
 
 async function setPreviewEnable() {
   if (!props.connected || !props.deviceIp) return;
+  const enable = previewEnabled.value;
   try {
     await invoke("start_preview", {
       deviceIp: props.deviceIp,
-      enable: previewEnabled.value,
+      enable,
     });
   } catch (e) {
+    // 下发失败时把按钮状态回滚，避免界面显示与设备实际状态不一致
+    previewEnabled.value = !enable;
     console.error("start_preview failed:", e);
+    toast.error(enable ? "开始采集失败" : "停止采集失败", String(e));
   }
 }
 
@@ -49,6 +56,10 @@ async function sendParam(cmd: number, value: number) {
     });
   } catch (e) {
     console.error(`send_command 0x${cmd.toString(16)} failed:`, e);
+    toast.error(
+      "参数下发失败",
+      `命令 0x${cmd.toString(16)}：${String(e)}`
+    );
   }
 }
 
@@ -61,6 +72,7 @@ async function sendAllCaptureParams() {
     await invoke("send_ref_channel", { deviceIp: props.deviceIp });
   } catch (e) {
     console.error("send_ref_channel failed:", e);
+    toast.error("参考通道下发失败", String(e));
   }
 
   const batch: [number, number][] = [

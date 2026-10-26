@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { onUnmounted } from "vue";
 import type { PreviewFrame } from "../types";
 import { decodePreviewFrame } from "../utils/previewCodec";
+import { useToast } from "./useToast";
 
 /**
  * 一帧预览数据：
@@ -14,6 +15,7 @@ export interface PreviewFrameCallback {
 }
 
 export function usePreviewData(onFrame: PreviewFrameCallback) {
+    const toast = useToast();
     // Tauri IPC Channel：Rust 端推送紧凑二进制，前端解码
     let channel: Channel<number[]> | null = null;
     let active = false;
@@ -91,6 +93,7 @@ export function usePreviewData(onFrame: PreviewFrameCallback) {
             console.error("register preview channel failed:", e);
             active = false;
             channel = null;
+            toast.error("预览通道注册失败", String(e));
         }
     }
 

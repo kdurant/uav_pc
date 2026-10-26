@@ -2,12 +2,15 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { SystemStatus } from "../../types";
+import { useToast } from "../../composables/useToast";
 
 const props = defineProps<{
   connected: boolean;
   deviceIp?: string;
   status?: SystemStatus | null;
 }>();
+
+const toast = useToast();
 
 // ===== 扩展板 DA 控制 (0x0f01)：PMT0/1/2 电压、APD 高压 =====
 const pmtVoltages = ref<number[]>([0, 0, 0]); // PMT0/PMT1/PMT2，0~5V
@@ -51,6 +54,8 @@ async function setDaChannel(channel: number) {
     await sendDaChannel(channel, digital);
   } catch (e) {
     console.error(`set DA channel ${channel} failed:`, e);
+    const name = channel === 3 ? "APD 高压" : `PMT${channel}`;
+    toast.error(`${name}设置失败`, String(e));
   } finally {
     daSetting.value = null;
   }

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import Layout from "./components/Layout.vue";
+import ToastHost from "./components/ToastHost.vue";
 </script>
 
 <template>
   <Layout />
+  <ToastHost />
 </template>
 
 <style>

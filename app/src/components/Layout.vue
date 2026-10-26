@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useDeviceDiscovery } from "../composables/useDeviceDiscovery";
 import { useSystemStatus } from "../composables/useSystemStatus";
 import { usePreviewData } from "../composables/usePreviewData";
+import { useToast } from "../composables/useToast";
 import DeviceSelector from "./DeviceSelector.vue";
 import StatusPanel from "./StatusPanel.vue";
 import ChartView from "./ChartView.vue";
@@ -15,6 +16,8 @@ const { devices, isSearching, selectedDevice, searchDevices, selectDevice, clear
   useDeviceDiscovery();
 
 const { status, stale: statusStale, start: startStatus, stop: stopStatus } = useSystemStatus();
+
+const toast = useToast();
 
 const connectionState = ref<ConnectionState>(ConnectionState.Disconnected);
 const showDeviceSelector = ref(false);
@@ -84,6 +87,10 @@ watch(statusStale, (stale) => {
     // 只有已经确认连接后才提示中断；连接中由超时逻辑处理
     if (connectionState.value === ConnectionState.Connected) {
       linkLost.value = true;
+      toast.warning(
+        "设备连接中断",
+        `${selectedDevice.value?.ip ?? "设备"} 的状态上报已停止`
+      );
     }
   } else if (connectionState.value === ConnectionState.Connected && status.value) {
     // 只有收到新的状态数据才恢复；关闭状态读取（status 被清空）时保持中断标记
@@ -153,6 +160,10 @@ async function handleSearch() {
   } else {
     connectionState.value = ConnectionState.Disconnected;
     clearSelection();
+    toast.warning(
+      "未发现设备",
+      "请确认 PC 与设备在同一网段，检查网线连接后重新搜索"
+    );
   }
 }
 
@@ -182,6 +193,10 @@ async function handleConnect(device: (typeof devices.value)[0]) {
       stopStatus();
       previewOutput.stop();
       clearSelection();
+      toast.error(
+        `连接失败：${device.ip}`,
+        `设备未在 ${CONNECT_TIMEOUT_MS / 1000} 秒内上报状态`
+      );
       // 尽力关闭设备状态上传
       invoke("query_sys_status", { deviceIp: device.ip, enable: false }).catch(() => {});
     }, CONNECT_TIMEOUT_MS);
@@ -199,6 +214,7 @@ async function handleConnect(device: (typeof devices.value)[0]) {
     connectFailedIp.value = device.ip;
     connectionState.value = ConnectionState.Disconnected;
     clearSelection();
+    toast.error(`连接失败：${device.ip}`, String(err));
   } finally {
     isConnecting.value = false;
   }
@@ -218,6 +234,10 @@ async function handleToggleStatus(enable: boolean) {
     }
   } catch (err) {
     console.error("Toggle status failed:", err);
+    toast.error(
+      enable ? "开启状态上报失败" : "关闭状态上报失败",
+      String(err)
+    );
   }
 }
 
@@ -233,6 +253,7 @@ async function handleDisconnect() {
         });
     } catch (err) {
       console.error("Disconnect failed:", err);
+      toast.error("断开连接失败", String(err));
     }
   }
   clearSelection();

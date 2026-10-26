@@ -3,11 +3,14 @@ import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { SsdFile } from "../../types";
 import StorageDrawer from "../StorageDrawer.vue";
+import { useToast } from "../../composables/useToast";
 
 const props = defineProps<{
   connected: boolean;
   deviceIp?: string;
 }>();
+
+const toast = useToast();
 
 // ===== 存储控制 =====
 const storeEnabled = ref(false);
@@ -16,7 +19,6 @@ const storeFilename = ref("");
 // 手动输入的名字则保持复用
 const storeFilenameAuto = ref(false);
 const storeBusy = ref(false);
-const storeError = ref("");
 
 /** 默认文件名：uav_YYYYMMDD_HHMMSS */
 function defaultStoreName(): string {
@@ -30,7 +32,7 @@ async function toggleStore() {
   const enable = storeEnabled.value;
   if (!props.connected || !props.deviceIp) {
     storeEnabled.value = !enable;
-    storeError.value = "请先连接设备";
+    toast.warning("请先连接设备", "存储开关需要设备在线后才能操作");
     return;
   }
   if (enable && (!storeFilename.value.trim() || storeFilenameAuto.value)) {
@@ -39,7 +41,6 @@ async function toggleStore() {
   }
 
   storeBusy.value = true;
-  storeError.value = "";
   try {
     await invoke("set_ssd_store", {
       deviceIp: props.deviceIp,
@@ -53,8 +54,8 @@ async function toggleStore() {
     }
   } catch (e) {
     storeEnabled.value = !enable;
-    storeError.value = String(e);
     console.error("set_ssd_store failed:", e);
+    toast.error(enable ? "开始存储失败" : "停止存储失败", String(e));
   } finally {
     storeBusy.value = false;
   }
@@ -80,6 +81,8 @@ async function loadSsdFiles(openDrawer: boolean) {
   } catch (e) {
     ssdError.value = String(e);
     console.error("list_ssd_files failed:", e);
+    // 抽屉未打开时错误无处展示（例如停止存储后的静默刷新），用通知兜底
+    if (!ssdDrawerVisible.value) toast.error("SSD 文件检索失败", String(e));
   } finally {
     ssdLoading.value = false;
   }
@@ -119,6 +122,7 @@ async function refreshGpsFiles() {
   } catch (e) {
     gpsError.value = String(e);
     console.error("query_gps_files failed:", e);
+    if (!gpsDrawerVisible.value) toast.error("GPS 文件检索失败", String(e));
   } finally {
     gpsLoading.value = false;
   }
@@ -152,7 +156,6 @@ async function refreshGpsFiles() {
           @input="storeFilenameAuto = false"
         />
       </label>
-      <p v-if="storeError" class="ssd-error">{{ storeError }}</p>
       <p class="hint">写入的是采集数据；文件名最多 32 个 ASCII 字符，留空时自动生成。</p>
     </section>
 
@@ -165,8 +168,7 @@ async function refreshGpsFiles() {
         {{ ssdLoading ? "检索中..." : "检索文件" }}
       </button>
 
-      <p v-if="ssdError" class="ssd-error">{{ ssdError }}</p>
-      <template v-else-if="ssdFiles.length">
+      <template v-if="ssdFiles.length">
         <div class="file-summary">
           <span class="summary-main">{{ ssdFiles.length }} 个文件</span>
           <span class="summary-sub">合计 {{ formatSize(ssdTotalSize) }}</span>
@@ -187,8 +189,7 @@ async function refreshGpsFiles() {
         {{ gpsLoading ? "检索中..." : "检索文件" }}
       </button>
 
-      <p v-if="gpsError" class="ssd-error">{{ gpsError }}</p>
-      <template v-else-if="gpsFiles.length">
+      <template v-if="gpsFiles.length">
         <div class="file-summary">
           <span class="summary-main">{{ gpsFiles.length }} 个文件</span>
         </div>
