@@ -9,6 +9,7 @@ import StatusPanel from "./StatusPanel.vue";
 import ChartView from "./ChartView.vue";
 import ControlPanel from "./ControlPanel.vue";
 import { ConnectionState } from "../types";
+import type { PreviewFrame } from "../types";
 
 const { devices, isSearching, selectedDevice, searchDevices, selectDevice, clearSelection } =
   useDeviceDiscovery();
@@ -25,12 +26,41 @@ const channelVisible = ref([true, true, true, true]);
 // Chart ref
 const chartRef = ref<InstanceType<typeof ChartView> | null>(null);
 
-// Preview data → ChartView（整帧、按绝对采样位置对齐）
-function pushPreviewFrame(series: number[][]) {
+// 预览帧中的细分时间（100ns 单位），显示在状态面板 GPS 周下方
+const previewSubTime = ref<number | null>(null);
+let lastPreviewSubTimeUpdate = 0;
+const PREVIEW_SUB_TIME_INTERVAL_MS = 100;
+
+/** 清空预览细分时间（断开/停止采集时避免显示旧值） */
+function clearPreviewSubTime() {
+  previewSubTime.value = null;
+  lastPreviewSubTimeUpdate = 0;
+}
+
+// Preview data → ChartView（整帧、按绝对采样位置对齐）+ 细分时间
+function pushPreviewFrame(series: number[][], frame: PreviewFrame) {
   chartRef.value?.setFrame(series);
+
+  // 细分时间不需要跟 30Hz 帧率刷新，限频到 10Hz，避免状态面板频繁重绘
+  const now = performance.now();
+  if (now - lastPreviewSubTimeUpdate >= PREVIEW_SUB_TIME_INTERVAL_MS) {
+    lastPreviewSubTimeUpdate = now;
+    previewSubTime.value = frame.sub_time;
+  }
 }
 
 const previewOutput = usePreviewData(pushPreviewFrame);
+
+// 断开连接或设备停止上传预览时清空细分时间
+watch(connectionState, (state) => {
+  if (state !== ConnectionState.Connected) clearPreviewSubTime();
+});
+watch(
+  () => status.value?.preview_enable,
+  (enabled) => {
+    if (!enabled) clearPreviewSubTime();
+  }
+);
 
 /** 连接中断标记：状态数据中断后置位，收到新状态或重新连接后清除 */
 const linkLost = ref(false);
@@ -309,7 +339,7 @@ handleSearch();
           </span>
         </div>
         <div class="panel-body">
-          <StatusPanel :status="status" />
+          <StatusPanel :status="status" :preview-sub-time="previewSubTime" />
         </div>
       </aside>
     </div>

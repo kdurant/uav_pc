@@ -7,9 +7,10 @@ import { decodePreviewFrame } from "../utils/previewCodec";
  * 一帧预览数据：
  * series[ch][i] 对应绝对采样位置 i 的值（数组索引 = 采样位置，从 0 开始），NaN 表示无数据。
  * 数组长度为两段提取区间的最大终点，X 轴默认范围由前端在此基础上扩展。
+ * frame 为解码后的完整预览帧，包含 GPS 周、细分时间、姿态等元数据。
  */
 export interface PreviewFrameCallback {
-    (series: number[][]): void;
+    (series: number[][], frame: PreviewFrame): void;
 }
 
 export function usePreviewData(onFrame: PreviewFrameCallback) {
@@ -56,7 +57,7 @@ export function usePreviewData(onFrame: PreviewFrameCallback) {
             series.push(arr);
         }
 
-        onFrame(series);
+        onFrame(series, frame);
     }
 
     /** 每帧最多处理一次，始终使用最新数据 */

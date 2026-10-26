@@ -7,6 +7,8 @@ import AttitudeView from "./AttitudeView.vue";
 
 const props = defineProps<{
   status: SystemStatus | null;
+  /** 预览帧中的细分时间（100ns 单位） */
+  previewSubTime?: number | null;
 }>();
 
 /** 方便模板安全访问 */
@@ -101,6 +103,14 @@ function sataClass(v: number | undefined): string {
 function fmt(v: number | undefined, digits = 2): string {
   if (v === undefined || v === null) return "-";
   return Number(v).toFixed(digits);
+}
+
+/** 细分时间（100ns 单位）格式化为原始值 + 易读时间 */
+function formatSubTime(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "-";
+  const ms = v / 10000;
+  const readable = ms >= 1000 ? `${(ms / 1000).toFixed(4)} s` : `${ms.toFixed(4)} ms`;
+  return `${v} (${readable})`;
 }
 
 /** 电机转速格式化（后端已按 1e9/(raw*8)*60 换算为 RPM） */
@@ -382,6 +392,15 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
         <div class="status-row">
           <span class="label">GPS 周</span>
           <span class="value mono">{{ s?.gps_week ?? "-" }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">细分时间</span>
+          <span
+            class="value mono"
+            :title="previewSubTime != null ? `原始值 ${previewSubTime}（100 ns 单位）` : ''"
+          >
+            {{ formatSubTime(previewSubTime) }}
+          </span>
         </div>
         <div class="status-row">
           <span class="label">经度</span>
