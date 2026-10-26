@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../../composables/useToast";
+import { useTriggerHelp } from "../../composables/useTriggerHelp";
 
 const props = defineProps<{
   connected: boolean;
@@ -9,6 +10,7 @@ const props = defineProps<{
 }>();
 
 const toast = useToast();
+const { open: openTriggerHelp } = useTriggerHelp();
 
 // ===== 采集控制 =====
 const previewEnabled = ref(false);
@@ -155,7 +157,18 @@ async function setTrgMode() {
     </section>
 
     <section class="ctrl-group">
-      <h4 class="group-title">信号采集模式</h4>
+      <h4 class="group-title">
+        信号采集模式
+        <button
+          type="button"
+          class="help-btn"
+          title="查看三种触发方式示意图"
+          aria-label="查看触发方式说明"
+          @click="openTriggerHelp(trgMode)"
+        >
+          ?
+        </button>
+      </h4>
       <div class="mode-grid">
         <label
           v-for="m in trigModes"

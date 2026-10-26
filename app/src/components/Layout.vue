@@ -9,6 +9,7 @@ import DeviceSelector from "./DeviceSelector.vue";
 import StatusPanel from "./StatusPanel.vue";
 import ChartView from "./ChartView.vue";
 import ControlPanel from "./ControlPanel.vue";
+import TriggerModeDialog from "./TriggerModeDialog.vue";
 import { ConnectionState } from "../types";
 import type { PreviewFrame } from "../types";
 
@@ -371,6 +372,13 @@ handleSearch();
       :visible="showDeviceSelector"
       @select="handleSelectDevice"
       @cancel="showDeviceSelector = false"
+    />
+
+    <!-- 触发方式说明（状态面板 / 控制面板共用） -->
+    <TriggerModeDialog
+      :device-mode="status ? Number(status.trg_mode) : undefined"
+      :sum-level="status?.sum_level"
+      :min-level="status?.min_level"
     />
   </div>
 </template>

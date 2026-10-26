@@ -79,6 +79,38 @@
   background: var(--border-color);
 }
 
+/* 分组标题旁的说明入口 */
+.help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--border-light);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: none;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.help-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dim);
+}
+
+.help-btn:active {
+  transform: none;
+  box-shadow: none;
+}
+
 .group-title .count-badge {
   font-size: 10px;
   font-weight: 650;

@@ -5,6 +5,7 @@ import type { SystemStatus, TemperatureConfig, TemperaturePoint } from "../types
 import TemperatureHistoryDialog from "./TemperatureHistoryDialog.vue";
 import AttitudeView from "./AttitudeView.vue";
 import { useToast } from "../composables/useToast";
+import { useTriggerHelp } from "../composables/useTriggerHelp";
 
 const props = defineProps<{
   status: SystemStatus | null;
@@ -13,6 +14,7 @@ const props = defineProps<{
 }>();
 
 const toast = useToast();
+const { open: openTriggerHelp } = useTriggerHelp();
 
 /** 方便模板安全访问 */
 const s = computed(() => props.status);
@@ -241,6 +243,7 @@ const sys0Flags = computed(() => {
 function trgModeLabel(v: number | undefined): string {
   if (v === 1) return "外触发";
   if (v === 0) return "内触发";
+  if (v === 2) return "PIN 触发";
   return "-";
 }
 
@@ -295,9 +298,27 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
         </div>
       </div>
       <div class="row-list">
-        <div class="status-row">
+        <div
+          class="status-row status-row-clickable"
+          title="点击查看触发方式示意图"
+          @click="openTriggerHelp(Number(s?.trg_mode ?? 0))"
+        >
           <span class="label">采集模式</span>
-          <span class="value">{{ trgModeLabel(s?.trg_mode) }}</span>
+          <span class="value value-with-icon">
+            {{ trgModeLabel(s?.trg_mode) }}
+            <svg
+              class="info-icon"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              aria-hidden="true"
+            >
+              <circle cx="8" cy="8" r="6.3" />
+              <path d="M8 7.3v3.6" stroke-linecap="round" />
+              <circle cx="8" cy="4.9" r="0.95" fill="currentColor" stroke="none" />
+            </svg>
+          </span>
         </div>
         <div class="status-row">
           <span class="label">激光器出光频率</span>
@@ -498,6 +519,29 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 
 .status-row:hover {
   background: var(--bg-inset);
+}
+
+/* 可点击的状态行（点击查看说明） */
+.status-row-clickable {
+  cursor: pointer;
+}
+
+.value-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.info-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: color 0.16s ease;
+}
+
+.status-row-clickable:hover .info-icon {
+  color: var(--accent);
 }
 
 .label {
