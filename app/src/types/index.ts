@@ -159,5 +159,7 @@ export interface SsdFile {
 export enum ConnectionState {
     Disconnected = "disconnected",
     Searching = "searching",
+    /** 已下发查询命令，等待第一帧设备状态 */
+    Connecting = "connecting",
     Connected = "connected",
 }

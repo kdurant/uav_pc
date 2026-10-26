@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useDeviceDiscovery } from "../composables/useDeviceDiscovery";
 import { useSystemStatus } from "../composables/useSystemStatus";
@@ -34,23 +34,57 @@ const previewOutput = usePreviewData(pushPreviewFrame);
 
 /** 连接中断标记：状态数据中断后置位，收到新状态或重新连接后清除 */
 const linkLost = ref(false);
+/** 连接失败的目标 IP（等待状态超时） */
+const connectFailedIp = ref("");
+/** 等待第一帧状态的超时定时器 */
+let connectTimer: number | null = null;
+
+function clearConnectTimer() {
+  if (connectTimer !== null) {
+    clearTimeout(connectTimer);
+    connectTimer = null;
+  }
+}
+
+/** 下发查询后最多等待多久收到第一帧状态 */
+const CONNECT_TIMEOUT_MS = 3500;
 
 watch(statusStale, (stale) => {
   if (stale) {
-    linkLost.value = true;
+    // 只有已经确认连接后才提示中断；连接中由超时逻辑处理
+    if (connectionState.value === ConnectionState.Connected) {
+      linkLost.value = true;
+    }
   } else if (connectionState.value === ConnectionState.Connected && status.value) {
     // 只有收到新的状态数据才恢复；关闭状态读取（status 被清空）时保持中断标记
     linkLost.value = false;
   }
 });
 
+// 第一帧状态到达后，才把“连接中”切换为“已连接”
+watch(status, (s) => {
+  if (s && connectionState.value === ConnectionState.Connecting) {
+    clearConnectTimer();
+    connectionState.value = ConnectionState.Connected;
+    linkLost.value = false;
+    connectFailedIp.value = "";
+  }
+});
+
+onUnmounted(clearConnectTimer);
+
 const statusLabel = computed(() => {
+  if (connectFailedIp.value) {
+    return `连接失败: ${connectFailedIp.value}`;
+  }
   if (linkLost.value) {
     return `连接中断: ${selectedDevice.value?.ip ?? ""}`;
   }
   switch (connectionState.value) {
     case ConnectionState.Searching:
       return "搜索中...";
+    case ConnectionState.Connecting:
+      return `连接中: ${selectedDevice.value?.ip ?? ""}`;
     case ConnectionState.Connected:
       return `已连接: ${selectedDevice.value?.ip ?? ""}`;
     default:
@@ -60,11 +94,13 @@ const statusLabel = computed(() => {
 
 /** 连接状态胶囊样式 */
 const connectionClass = computed(() => {
+  if (connectFailedIp.value) return "is-lost";
   if (linkLost.value) return "is-lost";
   switch (connectionState.value) {
     case ConnectionState.Connected:
       return "is-connected";
     case ConnectionState.Searching:
+    case ConnectionState.Connecting:
       return "is-searching";
     default:
       return "is-idle";
@@ -73,6 +109,10 @@ const connectionClass = computed(() => {
 
 async function handleSearch() {
   linkLost.value = false;
+  connectFailedIp.value = "";
+  clearConnectTimer();
+  stopStatus();
+  previewOutput.stop();
   connectionState.value = ConnectionState.Searching;
   await searchDevices();
 
@@ -82,6 +122,7 @@ async function handleSearch() {
     showDeviceSelector.value = true;
   } else {
     connectionState.value = ConnectionState.Disconnected;
+    clearSelection();
   }
 }
 
@@ -93,17 +134,39 @@ function handleSelectDevice(device: (typeof devices.value)[0]) {
 
 async function handleConnect(device: (typeof devices.value)[0]) {
   isConnecting.value = true;
+  linkLost.value = false;
+  connectFailedIp.value = "";
+  clearConnectTimer();
+  // 清掉上一次的状态，避免用旧数据立即判定为已连接
+  stopStatus();
+  connectionState.value = ConnectionState.Connecting;
+
   try {
+    // 先注册状态监听，再下发查询命令，避免错过第一帧
+    await startStatus();
+    connectTimer = window.setTimeout(() => {
+      if (connectionState.value !== ConnectionState.Connecting) return;
+      connectTimer = null;
+      connectFailedIp.value = device.ip;
+      connectionState.value = ConnectionState.Disconnected;
+      stopStatus();
+      previewOutput.stop();
+      clearSelection();
+      // 尽力关闭设备状态上传
+      invoke("query_sys_status", { deviceIp: device.ip, enable: false }).catch(() => {});
+    }, CONNECT_TIMEOUT_MS);
+
     await invoke("query_sys_status", {
       deviceIp: device.ip,
       enable: true,
     });
-    connectionState.value = ConnectionState.Connected;
-    linkLost.value = false;
-    startStatus();
     previewOutput.start();
   } catch (err) {
     console.error("Connection failed:", err);
+    clearConnectTimer();
+    stopStatus();
+    previewOutput.stop();
+    connectFailedIp.value = device.ip;
     connectionState.value = ConnectionState.Disconnected;
     clearSelection();
   } finally {
@@ -129,6 +192,7 @@ async function handleToggleStatus(enable: boolean) {
 }
 
 async function handleDisconnect() {
+  clearConnectTimer();
   stopStatus();
   previewOutput.stop();
   if (selectedDevice.value) {
@@ -143,14 +207,17 @@ async function handleDisconnect() {
   }
   clearSelection();
   linkLost.value = false;
+  connectFailedIp.value = "";
   connectionState.value = ConnectionState.Disconnected;
 }
 
 /** 设备重启/关机命令已发出：立即按断开处理，不再等待状态超时 */
 function handlePowered() {
+  clearConnectTimer();
   stopStatus();
   previewOutput.stop();
   linkLost.value = false;
+  connectFailedIp.value = "";
   clearSelection();
   connectionState.value = ConnectionState.Disconnected;
 }
@@ -184,10 +251,18 @@ handleSearch();
         <button
           v-if="connectionState !== ConnectionState.Connected || linkLost"
           class="accent"
-          :disabled="isSearching || isConnecting"
+          :disabled="isSearching || isConnecting || connectionState === ConnectionState.Connecting"
           @click="handleSearch"
         >
-          {{ isSearching ? "搜索中..." : linkLost ? "重新搜索" : "搜索设备" }}
+          {{
+            isSearching
+              ? "搜索中..."
+              : connectionState === ConnectionState.Connecting
+                ? "连接中..."
+                : linkLost || connectFailedIp
+                  ? "重新搜索"
+                  : "搜索设备"
+          }}
         </button>
       </div>
     </header>
