@@ -194,7 +194,7 @@ async function refreshGpsFiles() {
         </div>
         <button class="block view-btn" @click="gpsDrawerVisible = true">查看文件列表</button>
       </template>
-      <p v-else-if="gpsQueried" class="ssd-empty">无文件（或目录不存在）</p>
+      <p v-else-if="gpsQueried" class="ssd-empty">无文件</p>
 
       <p class="ssd-unit">路径：/run/media/mmcblk1p1/（可在 config.toml [gps].dir 修改）</p>
     </section>

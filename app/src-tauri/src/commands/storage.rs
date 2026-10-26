@@ -327,6 +327,38 @@ async fn system_cmd_lines(
     Ok(lines)
 }
 
+/// GPS 目录不存在时，由设备 shell 返回的标记
+const GPS_NO_SD_MARKER: &str = "__UAV_GPS_NO_SD__";
+
+/// 单引号包裹 shell 参数，内部的单引号按 `'\''` 转义
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// 构造 GPS 目录检索命令：目录存在时执行 `ls`，否则输出无 SD 卡标记
+fn build_gps_list_command(dir: &str) -> String {
+    let dir = shell_quote(dir);
+    format!(
+        "if [ -d {dir} ]; then ls {dir}; else echo {marker}; fi",
+        dir = dir,
+        marker = GPS_NO_SD_MARKER
+    )
+}
+
+/// 解析 `ls` 输出：识别无 SD 卡标记，并过滤设备返回的错误行
+fn parse_gps_files(lines: Vec<String>) -> Result<Vec<String>, String> {
+    if lines.iter().any(|line| line == GPS_NO_SD_MARKER) {
+        return Err("设备未插入 SD 卡，请插入 SD 卡后重试".into());
+    }
+    if let Some(err) = lines.iter().find(|line| line.starts_with("ls:")) {
+        return Err(format!("读取 GPS 目录失败：{}", err));
+    }
+    Ok(lines
+        .into_iter()
+        .filter(|line| line != GPS_NO_SD_MARKER)
+        .collect())
+}
+
 /// GPS 数据文件列表：使用 0x0110 执行 `ls <gps.dir>`
 #[tauri::command]
 pub async fn query_gps_files(app: AppHandle, device_ip: String) -> Result<Vec<String>, String> {
@@ -337,7 +369,7 @@ pub async fn query_gps_files(app: AppHandle, device_ip: String) -> Result<Vec<St
     let target: SocketAddr = format!("{}:{}", device_ip, config.basic.remote_port)
         .parse()
         .map_err(|e| format!("Invalid device address: {}", e))?;
-    let command = format!("ls {}", config.gps.dir);
+    let command = build_gps_list_command(&config.gps.dir);
 
     // 先订阅广播通道，避免设备响应早于订阅而丢失
     let mut rx = {
@@ -347,7 +379,8 @@ pub async fn query_gps_files(app: AppHandle, device_ip: String) -> Result<Vec<St
     };
 
     let seq = next_seq_inner(&app).await;
-    let files = system_cmd_lines(&network, &target, &mut rx, &command, seq).await?;
+    let lines = system_cmd_lines(&network, &target, &mut rx, &command, seq).await?;
+    let files = parse_gps_files(lines)?;
 
     log::info!(
         "GPS file query '{}' from {}: {} entr(ies)",
@@ -360,7 +393,10 @@ pub async fn query_gps_files(app: AppHandle, device_ip: String) -> Result<Vec<St
 
 #[cfg(test)]
 mod tests {
-    use super::{build_ssd_name_sector, parse_ssd_name};
+    use super::{
+        build_gps_list_command, build_ssd_name_sector, parse_gps_files, parse_ssd_name,
+        shell_quote, GPS_NO_SD_MARKER,
+    };
 
     #[test]
     fn test_parse_name_normal() {
@@ -393,5 +429,48 @@ mod tests {
         assert!(build_ssd_name_sector("").is_err());
         assert!(build_ssd_name_sector("文件名").is_err());
         assert!(build_ssd_name_sector(&"a".repeat(33)).is_err());
+    }
+
+    #[test]
+    fn test_shell_quote() {
+        assert_eq!(shell_quote("/run/media/mmcblk1p1/"), "'/run/media/mmcblk1p1/'");
+        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+    }
+
+    #[test]
+    fn test_build_gps_list_command() {
+        let cmd = build_gps_list_command("/run/media/mmcblk1p1/");
+        assert_eq!(
+            cmd,
+            format!(
+                "if [ -d '/run/media/mmcblk1p1/' ]; then ls '/run/media/mmcblk1p1/'; else echo {}; fi",
+                GPS_NO_SD_MARKER
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_gps_files_no_sd() {
+        let err = parse_gps_files(vec![GPS_NO_SD_MARKER.to_string()]).unwrap_err();
+        assert!(err.contains("SD 卡"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn test_parse_gps_files_normal() {
+        let files = parse_gps_files(vec![
+            "2026-05-13_1.gps".to_string(),
+            "2026-05-13_2.gps".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_gps_files_ls_error() {
+        let err = parse_gps_files(vec![
+            "ls: cannot access '/run/media/mmcblk1p1/': No such file or directory".to_string(),
+        ])
+        .unwrap_err();
+        assert!(err.contains("读取 GPS 目录失败"));
     }
 }
