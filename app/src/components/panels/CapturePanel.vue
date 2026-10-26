@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../../composables/useToast";
 import { useTriggerHelp } from "../../composables/useTriggerHelp";
+import CaptureParamsDialog from "../CaptureParamsDialog.vue";
 
 const props = defineProps<{
   connected: boolean;
@@ -11,6 +12,9 @@ const props = defineProps<{
 
 const toast = useToast();
 const { open: openTriggerHelp } = useTriggerHelp();
+
+/** 采集参数说明弹窗 */
+const paramsHelpVisible = ref(false);
 
 // ===== 采集控制 =====
 const previewEnabled = ref(false);
@@ -109,7 +113,18 @@ async function setTrgMode() {
 <template>
   <div class="tab-content">
     <section class="ctrl-group">
-      <h4 class="group-title">实时采集参数</h4>
+      <h4 class="group-title">
+        实时采集参数
+        <button
+          type="button"
+          class="help-btn"
+          title="查看采集参数示意图"
+          aria-label="查看采集参数说明"
+          @click="paramsHelpVisible = true"
+        >
+          ?
+        </button>
+      </h4>
 
       <div class="field-list">
         <label class="field">
@@ -187,5 +202,17 @@ async function setTrgMode() {
         </label>
       </div>
     </section>
+
+    <CaptureParamsDialog
+      :visible="paramsHelpVisible"
+      :wave-len="Number(waveLen) || 0"
+      :first-pos="Number(firstPos) || 0"
+      :first-len="Number(firstLen) || 0"
+      :second-pos="Number(secondPos) || 0"
+      :second-len="Number(secondLen) || 0"
+      :sum-level="Number(sumLevel) || 0"
+      :min-level="Number(minLevel) || 0"
+      @close="paramsHelpVisible = false"
+    />
   </div>
 </template>
