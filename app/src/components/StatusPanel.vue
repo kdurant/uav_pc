@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { SystemStatus, TemperatureConfig, TemperaturePoint } from "../types";
 import TemperatureHistoryDialog from "./TemperatureHistoryDialog.vue";
+import AttitudeView from "./AttitudeView.vue";
 
 const props = defineProps<{
   status: SystemStatus | null;
@@ -391,20 +392,12 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
           <span class="value mono">{{ fmtFixed(s?.gps_altitude, 2) }} m</span>
         </div>
       </div>
-      <div class="attitude-grid">
-        <div class="attitude">
-          <span class="metric-label">方位角</span>
-          <span class="attitude-value">{{ fmt(s?.gps_azimuth, 2) }}<i>°</i></span>
-        </div>
-        <div class="attitude">
-          <span class="metric-label">俯仰角</span>
-          <span class="attitude-value">{{ fmt(s?.gps_pitch, 2) }}<i>°</i></span>
-        </div>
-        <div class="attitude">
-          <span class="metric-label">横滚角</span>
-          <span class="attitude-value">{{ fmt(s?.gps_roll, 2) }}<i>°</i></span>
-        </div>
-      </div>
+      <AttitudeView
+        class="gps-attitude"
+        :azimuth="s?.gps_azimuth ?? null"
+        :pitch="s?.gps_pitch ?? null"
+        :roll="s?.gps_roll ?? null"
+      />
     </section>
 
     <TemperatureHistoryDialog
@@ -437,6 +430,11 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 
 .status-group:last-child {
   margin-bottom: 4px;
+}
+
+/* GPS 分组底部的姿态 3D 视图 */
+.gps-attitude {
+  margin-top: 10px;
 }
 
 .status-group h4 {
@@ -630,39 +628,6 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 .status-off {
   background: var(--bg-tertiary);
   color: var(--text-tertiary);
-}
-
-/* 姿态角 */
-.attitude-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.attitude {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: center;
-  padding: 7px 4px;
-  background: var(--bg-inset);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-}
-
-.attitude-value {
-  font-size: 13.5px;
-  font-weight: 650;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.attitude-value i {
-  font-style: normal;
-  font-size: 10px;
-  color: var(--text-tertiary);
-  margin-left: 1px;
 }
 
 /* FIFO 告警 */
