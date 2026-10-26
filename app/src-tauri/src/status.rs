@@ -216,11 +216,13 @@ impl SystemStatus {
         status.pin_threshold = read_u32(data, &mut offset).unwrap_or(0);
         // gps_store_enable
         status.gps_store_enable = read_u32(data, &mut offset).unwrap_or(0);
+        // GPSData 按 8 字节对齐：gps_store_enable 后有 4 字节填充，
+        // gps_week 实际位于偏移 264（此前误读 260 的填充值，始终为 0）
+        offset += 4;
         // gps_week
         status.gps_week = read_u32(data, &mut offset).unwrap_or(0);
-        // 固件在 GPS 段实际多出一个 8 字节字段（sys_status.md 未列出），
-        // 不跳过会导致其后所有字段（激光频率、硬盘容量等）整体错位
-        offset += 8;
+        // gps_week 与 double gps_second 之间还有 4 字节对齐填充
+        offset += 4;
         // double gps_second
         status.gps_second = read_f64(data, &mut offset).unwrap_or(0.0);
         // double gps_latitude
@@ -300,13 +302,26 @@ mod tests {
 
     #[test]
     fn test_parse_disk_and_laser_offset() {
-        // 固件在 GPS 段多出 8 字节，验证跳过后 laser_freq / 硬盘容量落在正确偏移
+        // GPSData 按 8 字节对齐，验证后续 laser_freq / 硬盘容量仍落在正确偏移
         let mut data = vec![0u8; 376];
         data[328..332].copy_from_slice(&5000u32.to_le_bytes()); // laser_freq
         data[352..360].copy_from_slice(&1_953_525_168u64.to_le_bytes()); // 1TB 容量（扇区）
         let status = SystemStatus::parse(&data).unwrap();
         assert_eq!(status.laser_freq, 5000);
         assert_eq!(status.sata_dev_tot_sec_num, 1_953_525_168);
+    }
+
+    #[test]
+    fn test_parse_gps_week_with_alignment_padding() {
+        // gps_store_enable(256) + 4B 填充 + gps_week(264) + 4B 填充 + gps_second(272)
+        let mut data = vec![0u8; 376];
+        data[256..260].copy_from_slice(&1u32.to_le_bytes()); // gps_store_enable
+        data[264..268].copy_from_slice(&1111u32.to_le_bytes()); // gps_week
+        data[272..280].copy_from_slice(&2222.22f64.to_le_bytes()); // gps_second
+        let status = SystemStatus::parse(&data).unwrap();
+        assert_eq!(status.gps_store_enable, 1);
+        assert_eq!(status.gps_week, 1111);
+        assert!((status.gps_second - 2222.22).abs() < 1e-9);
     }
 
     #[test]

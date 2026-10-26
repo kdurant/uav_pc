@@ -275,11 +275,11 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
           <span class="metric-value">{{ fmtMotorSpeed(s?.motor_speed) }}<i>RPM</i></span>
         </div>
         <div class="metric">
-          <span class="metric-label">触发周期</span>
+          <span class="metric-label">触发频率</span>
           <span class="metric-value">{{ fmt(s?.trg_cycle, 1) }}<i>Hz</i></span>
         </div>
         <div class="metric">
-          <span class="metric-label">PPS 周期</span>
+          <span class="metric-label">PPS 频率</span>
           <span class="metric-value">{{ fmt(s?.pps_cycle, 1) }}<i>Hz</i></span>
         </div>
       </div>
@@ -379,6 +379,10 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
     <section class="status-group">
       <h4>GPS 数据</h4>
       <div class="row-list">
+        <div class="status-row">
+          <span class="label">GPS 周</span>
+          <span class="value mono">{{ s?.gps_week ?? "-" }}</span>
+        </div>
         <div class="status-row">
           <span class="label">经度</span>
           <span class="value mono">{{ fmtFixed(s?.gps_longitude, 6) }}°</span>

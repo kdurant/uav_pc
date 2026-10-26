@@ -41,7 +41,7 @@
 | uint32_t    | min_level              | 值阈值                                                                                |
 | uint32_t    | pin_threshold          |                                                                                       |
 | uint32_t    | gps_store_enable       |                                                                                       |
-| uint32_t    | gps_week               |                                                                                       |
+| uint32_t    | gps_week               | GPSData 按 8 字节对齐，实际位于偏移 264                                                |
 | double      | gps_second             |                                                                                       |
 | double      | gps_latitude           |                                                                                       |
 | double      | gps_longitude          |                                                                                       |
