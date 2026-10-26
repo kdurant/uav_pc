@@ -296,11 +296,11 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       <p v-if="historyError" class="history-error">{{ historyError }}</p>
       <div class="row-list">
         <div class="status-row">
-          <span class="label">触发模式</span>
+          <span class="label">采集模式</span>
           <span class="value">{{ trgModeLabel(s?.trg_mode) }}</span>
         </div>
         <div class="status-row">
-          <span class="label">激光频率</span>
+          <span class="label">激光器出光频率</span>
           <span class="value mono">{{ s ? s.laser_freq + " Hz" : "-" }}</span>
         </div>
       </div>
