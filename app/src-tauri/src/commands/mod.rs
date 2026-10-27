@@ -68,6 +68,8 @@ pub struct NetworkState {    pub network: Option<Arc<UdpNetwork>>,
     pub last_status: Option<crate::status::SystemStatus>,
     /// SSD 相关操作（文件列表/存储/下载）的串行化锁
     pub ssd_lock: Arc<tokio::sync::Mutex<()>>,
+    /// 文件下载锁：SSD 下载和 SD 卡下载不能同时进行
+    pub download_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// 获取或初始化 NetworkState
@@ -378,6 +380,19 @@ async fn try_acquire_ssd_lock(
         .map_err(|_| "已有 SSD 操作进行中，请稍后再试".to_string())
 }
 
+/// 尝试获取下载锁：SSD 下载和 SD 卡下载互斥
+async fn try_acquire_download_lock(
+    app: &AppHandle,
+) -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
+    let lock = {
+        let state = app.state::<Arc<Mutex<NetworkState>>>();
+        let guard = state.lock().await;
+        guard.download_lock.clone()
+    };
+    lock.try_lock_owned()
+        .map_err(|_| "已有下载任务进行中，请稍后再试".to_string())
+}
+
 /// 订阅后台监听器转发的帧
 async fn subscribe_frames(app: &AppHandle) -> broadcast::Receiver<(Frame, SocketAddr)> {
     let state = app.state::<Arc<Mutex<NetworkState>>>();
@@ -540,9 +555,11 @@ pub async fn send_command(
 }
 
 mod control;
+mod sdcard;
 mod storage;
 
 pub use control::*;
+pub use sdcard::*;
 pub use storage::*;
 
 #[cfg(test)]

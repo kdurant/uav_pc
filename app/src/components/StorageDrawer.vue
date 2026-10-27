@@ -7,6 +7,8 @@ interface DrawerFile {
     start?: number;
     end?: number;
     size?: number;
+    /** Unix 时间戳（秒） */
+    mtime?: number;
 }
 
 const props = defineProps<{
@@ -47,6 +49,14 @@ function formatSpeed(bytesPerSec: number): string {
     return `${(bytesPerSec / 1024 / 1024).toFixed(1)} MB/s`;
 }
 
+/** Unix 秒 → 本地时间字符串 */
+function formatMtime(sec?: number): string {
+    if (!sec) return "-";
+    const d = new Date(sec * 1000);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 const totalSize = computed(() =>
     props.files.reduce((sum, f) => sum + (f.size ?? 0), 0)
 );
@@ -70,7 +80,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                             <p v-if="loading">正在检索文件...</p>
                             <p v-else>
                                 共 {{ files.length }} 个文件
-                                <template v-if="mode === 'ssd' && files.length">
+                                <template v-if="files.length">
                                     · 合计 {{ formatSize(totalSize) }}
                                 </template>
                             </p>
@@ -153,8 +163,12 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                                             <th class="col-num">起始地址</th>
                                             <th class="col-num">结束地址</th>
                                             <th class="col-num">大小</th>
-                                            <th class="col-action">操作</th>
                                         </template>
+                                        <template v-else>
+                                            <th class="col-num">大小</th>
+                                            <th class="col-time">修改时间</th>
+                                        </template>
+                                        <th class="col-action">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -164,16 +178,20 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                                             <td class="col-num">{{ f.start }}</td>
                                             <td class="col-num">{{ f.end }}</td>
                                             <td class="col-num">{{ formatSize(f.size ?? 0) }}</td>
-                                            <td class="col-action">
-                                                <button
-                                                    class="row-btn"
-                                                    :disabled="!canDownload || !!download || (f.end ?? 0) <= (f.start ?? 0)"
-                                                    @click="emit('download', f)"
-                                                >
-                                                    下载
-                                                </button>
-                                            </td>
                                         </template>
+                                        <template v-else>
+                                            <td class="col-num">{{ formatSize(f.size ?? 0) }}</td>
+                                            <td class="col-time">{{ formatMtime(f.mtime) }}</td>
+                                        </template>
+                                        <td class="col-action">
+                                            <button
+                                                class="row-btn"
+                                                :disabled="!canDownload || !!download || (mode === 'ssd' && (f.end ?? 0) <= (f.start ?? 0))"
+                                                @click="emit('download', f)"
+                                            >
+                                                下载
+                                            </button>
+                                        </td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -355,6 +373,11 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 .file-table .col-action {
     width: 72px;
     text-align: right;
+}
+
+.file-table .col-time {
+    width: 150px;
+    color: var(--text-secondary);
 }
 
 .row-btn {

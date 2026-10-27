@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
+  SdFile,
   SsdDownloadProgress,
   SsdDownloadState,
   SsdFile,
@@ -76,13 +77,14 @@ const ssdDrawerVisible = ref(false);
 
 const ssdTotalSize = computed(() => ssdFiles.value.reduce((sum, f) => sum + f.size, 0));
 
-// ===== SSD 文件 TCP 下载 =====
+// ===== 文件下载（SSD / SD 卡共用进度 UI） =====
 const downloadState = ref<SsdDownloadState | null>(null);
+const downloadSource = ref<"ssd" | "sd" | null>(null);
 const downloadError = ref("");
 const downloadMessage = ref("");
 
-/** 是否允许下载：连接正常、未存储、SATA 已连接、无并发下载 */
-const canDownload = computed(() => {
+/** SSD 下载条件：连接正常、状态读取开启、未存储、SATA 已连接、无并发下载 */
+const canDownloadSsd = computed(() => {
   if (!props.connected || !props.deviceIp) return false;
   if (!props.status) return false;
   if (downloadState.value) return false;
@@ -91,53 +93,46 @@ const canDownload = computed(() => {
   return true;
 });
 
-/** 下载 SSD 文件：每次弹窗选择保存目录，1MB 分块由后端处理 */
-async function downloadFile(file: {
-  name: string;
-  start?: number;
-  end?: number;
-  size?: number;
-}) {
-  if (!props.connected || !props.deviceIp || downloadState.value) return;
-  if (!props.status) {
-    downloadError.value = "请先开启“读取设备状态”后再下载文件";
-    return;
-  }
-  if (file.start === undefined || file.end === undefined || file.end <= file.start) {
-    downloadError.value = "文件地址无效，无法下载";
-    return;
-  }
-  if (props.status?.ssd_store_enable === 1) {
-    downloadError.value = "设备正在存储，请先停止存储后再下载";
-    return;
-  }
-  if (props.status && props.status.sata_dev_identify_done !== 1) {
-    downloadError.value = "SATA 未连接，无法下载";
-    return;
-  }
+/** SD 卡下载条件：连接正常、无并发下载 */
+const canDownloadSd = computed(() => {
+  return !!props.connected && !!props.deviceIp && !downloadState.value;
+});
 
+/** 弹出目录选择框；取消返回 null */
+async function chooseSaveDir(title: string): Promise<string | null> {
   let selected: string | string[] | null = null;
   try {
     selected = await open({
       directory: true,
       multiple: false,
-      title: "选择 SSD 文件保存目录",
+      title,
     });
   } catch (e) {
     downloadError.value = `打开目录选择框失败: ${e}`;
-    return;
+    return null;
   }
-  if (!selected || Array.isArray(selected)) return;
+  if (!selected || Array.isArray(selected)) return null;
   if (!props.connected || !props.deviceIp) {
     downloadError.value = "设备已断开连接";
-    return;
+    return null;
   }
+  return selected;
+}
 
-  const total = (file.end - file.start) * 512;
+/** 执行下载：统一处理进度、速度、取消、提示 */
+async function runDownload(
+  source: "ssd" | "sd",
+  name: string,
+  total: number,
+  command: string,
+  args: Record<string, unknown>,
+) {
+  if (downloadState.value) return;
+  downloadSource.value = source;
   downloadError.value = "";
   downloadMessage.value = "";
   downloadState.value = {
-    name: file.name,
+    name,
     transferred: 0,
     total,
     percent: 0,
@@ -157,36 +152,95 @@ async function downloadFile(file: {
   };
 
   try {
-    const savedPath = await invoke<string>("download_ssd_file", {
-      deviceIp: props.deviceIp,
-      startLba: file.start,
-      totalSectors: file.end - file.start,
-      filename: file.name,
-      localDir: selected,
-      channel,
-    });
+    const savedPath = await invoke<string>(command, { ...args, channel });
     downloadMessage.value = `已保存到 ${savedPath}`;
-    toast.success("文件下载完成", file.name);
+    toast.success("文件下载完成", name);
   } catch (e) {
     const msg = String(e);
     if (msg.includes("取消")) {
       downloadError.value = "已取消下载，临时文件已删除";
-      toast.info("已取消下载", file.name);
+      toast.info("已取消下载", name);
     } else {
       downloadError.value = msg;
       toast.error("文件下载失败", msg);
     }
   } finally {
     downloadState.value = null;
+    downloadSource.value = null;
   }
 }
 
-/** 取消下载：后端在下一个 1MB 块边界停止并删除临时文件 */
+/** 下载 SSD 文件 */
+async function downloadFile(file: {
+  name: string;
+  start?: number;
+  end?: number;
+  size?: number;
+}) {
+  const deviceIp = props.deviceIp;
+  if (!props.connected || !deviceIp || downloadState.value) return;
+  if (!props.status) {
+    downloadError.value = "请先开启“读取设备状态”后再下载文件";
+    return;
+  }
+  if (file.start === undefined || file.end === undefined || file.end <= file.start) {
+    downloadError.value = "文件地址无效，无法下载";
+    return;
+  }
+  if (props.status.ssd_store_enable === 1) {
+    downloadError.value = "设备正在存储，请先停止存储后再下载";
+    return;
+  }
+  if (props.status.sata_dev_identify_done !== 1) {
+    downloadError.value = "SATA 未连接，无法下载";
+    return;
+  }
+
+  const selected = await chooseSaveDir("选择 SSD 文件保存目录");
+  if (!selected) return;
+
+  await runDownload(
+    "ssd",
+    file.name,
+    (file.end - file.start) * 512,
+    "download_ssd_file",
+    {
+      deviceIp,
+      startLba: file.start,
+      totalSectors: file.end - file.start,
+      filename: file.name,
+      localDir: selected,
+    },
+  );
+}
+
+/** 下载 SD 卡文件 */
+async function downloadSdFile(file: {
+  name: string;
+  size?: number;
+  mtime?: number;
+}) {
+  const deviceIp = props.deviceIp;
+  if (!props.connected || !deviceIp || downloadState.value) return;
+
+  const selected = await chooseSaveDir("选择 SD 卡文件保存目录");
+  if (!selected) return;
+
+  await runDownload("sd", file.name, file.size ?? 0, "download_sd_file", {
+    deviceIp,
+    filename: file.name,
+    localDir: selected,
+  });
+}
+
+/** 取消下载：根据来源调用对应后端的取消命令 */
 async function cancelDownload() {
   if (!downloadState.value) return;
   downloadState.value = { ...downloadState.value, cancelling: true };
+  const command =
+    downloadSource.value === "sd" ? "cancel_sd_download" : "cancel_ssd_download";
   try {
-    await invoke("cancel_ssd_download");
+    await invoke(command);
   } catch (e) {
     downloadError.value = String(e);
   }
@@ -229,14 +283,17 @@ function formatSpeed(bytesPerSec: number): string {
   return `${(bytesPerSec / 1024 / 1024).toFixed(1)} MB/s`;
 }
 
-// ===== GPS 数据文件列表（0x0110 系统指令 + ls） =====
-const gpsFiles = ref<string[]>([]);
+// ===== GPS / SD 卡数据文件列表（SFTP） =====
+const gpsFiles = ref<SdFile[]>([]);
 const gpsLoading = ref(false);
 const gpsError = ref("");
 const gpsQueried = ref(false);
 const gpsDrawerVisible = ref(false);
 
-const gpsDrawerFiles = computed(() => gpsFiles.value.map((name) => ({ name })));
+const gpsTotalSize = computed(() => gpsFiles.value.reduce((sum, f) => sum + f.size, 0));
+const gpsDrawerFiles = computed(() =>
+  gpsFiles.value.map((f) => ({ name: f.name, size: f.size, mtime: f.mtime })),
+);
 
 async function refreshGpsFiles() {
   if (!props.connected || !props.deviceIp) return;
@@ -244,14 +301,15 @@ async function refreshGpsFiles() {
   gpsLoading.value = true;
   gpsError.value = "";
   try {
-    gpsFiles.value = await invoke<string[]>("query_gps_files", {
+    gpsFiles.value = await invoke<SdFile[]>("list_sd_files", {
       deviceIp: props.deviceIp,
     });
     gpsQueried.value = true;
   } catch (e) {
     gpsError.value = String(e);
-    console.error("query_gps_files failed:", e);
-    if (!gpsDrawerVisible.value) toast.error("GPS 文件检索失败", String(e));
+    gpsFiles.value = [];
+    console.error("list_sd_files failed:", e);
+    if (!gpsDrawerVisible.value) toast.error("SD 卡文件检索失败", String(e));
   } finally {
     gpsLoading.value = false;
   }
@@ -260,6 +318,25 @@ async function refreshGpsFiles() {
 
 <template>
   <div class="tab-content">
+    <section
+      v-if="downloadState || downloadMessage || downloadError"
+      class="ctrl-group"
+    >
+      <h4 class="group-title">文件下载</h4>
+      <p v-if="downloadState" class="hint">
+        正在下载 {{ downloadState.name }}：{{ downloadState.percent.toFixed(1) }}%
+        · {{ formatSpeed(downloadState.speed_bps) }}
+        <template v-if="downloadState.chunk_mb"> · 分块 {{ downloadState.chunk_mb }}MB</template>
+      </p>
+      <div v-if="downloadState" class="btn-row">
+        <button :disabled="downloadState.cancelling" @click="cancelDownload">
+          {{ downloadState.cancelling ? "取消中..." : "取消下载" }}
+        </button>
+      </div>
+      <p v-if="downloadMessage" class="ssd-empty">{{ downloadMessage }}</p>
+      <p v-if="downloadError" class="ssd-error">{{ downloadError }}</p>
+    </section>
+
     <section class="ctrl-group">
       <h4 class="group-title">存储控制</h4>
       <div class="switch-row card-row">
@@ -315,19 +392,12 @@ async function refreshGpsFiles() {
       </template>
       <p v-else class="ssd-empty">暂无文件，点击“检索文件”</p>
 
-      <p v-if="downloadState" class="hint">
-        正在下载 {{ downloadState.name }}：{{ downloadState.percent.toFixed(1) }}%
-        · {{ formatSpeed(downloadState.speed_bps) }}
-        <template v-if="downloadState.chunk_mb"> · 分块 {{ downloadState.chunk_mb }}MB</template>
-      </p>
-      <p v-else-if="!props.status" class="hint">
+      <p v-if="!props.status" class="hint">
         请先开启“读取设备状态”后再下载文件。
       </p>
       <p v-else-if="props.status.ssd_store_enable === 1" class="hint">
         设备正在存储，停止存储后才能下载文件。
       </p>
-      <p v-if="downloadMessage" class="ssd-empty">{{ downloadMessage }}</p>
-      <p v-if="downloadError" class="ssd-error">{{ downloadError }}</p>
 
       <p class="ssd-unit">地址单位：扇区（512 B）</p>
     </section>
@@ -348,6 +418,7 @@ async function refreshGpsFiles() {
       <template v-if="gpsFiles.length">
         <div class="file-summary">
           <span class="summary-main">{{ gpsFiles.length }} 个文件</span>
+          <span class="summary-sub">合计 {{ formatSize(gpsTotalSize) }}</span>
         </div>
         <button class="block view-btn" @click="gpsDrawerVisible = true">查看文件列表</button>
       </template>
@@ -364,7 +435,7 @@ async function refreshGpsFiles() {
       :error="ssdError"
       :files="ssdFiles"
       :download="downloadState"
-      :can-download="canDownload"
+      :can-download="canDownloadSsd"
       :download-error="downloadError"
       :download-message="downloadMessage"
       @close="ssdDrawerVisible = false"
@@ -374,13 +445,19 @@ async function refreshGpsFiles() {
     />
     <StorageDrawer
       :visible="gpsDrawerVisible"
-      title="GPS 数据文件"
+      title="SD 卡 GPS 数据文件"
       mode="gps"
       :loading="gpsLoading"
       :error="gpsError"
       :files="gpsDrawerFiles"
+      :download="downloadState"
+      :can-download="canDownloadSd"
+      :download-error="downloadError"
+      :download-message="downloadMessage"
       @close="gpsDrawerVisible = false"
       @refresh="refreshGpsFiles"
+      @download="downloadSdFile"
+      @cancel-download="cancelDownload"
     />
   </div>
 </template>

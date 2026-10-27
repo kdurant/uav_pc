@@ -155,6 +155,15 @@ export interface SsdFile {
     size: number;
 }
 
+/** SD 卡 GPS 文件（SFTP） */
+export interface SdFile {
+    name: string;
+    /** 文件大小（字节） */
+    size: number;
+    /** Unix 时间戳（秒） */
+    mtime: number;
+}
+
 /** SSD 下载进度（对应 Rust SsdDownloadProgress） */
 export interface SsdDownloadProgress {
     /** 已传输字节数 */

@@ -7,6 +7,7 @@ use tokio::sync::{broadcast, Mutex};
 
 mod commands;
 mod config;
+mod device_sftp;
 mod laser;
 mod motor;
 mod network;
@@ -149,6 +150,7 @@ pub fn run() {
             op_lock: Arc::new(tokio::sync::Mutex::new(())),
             last_status: None,
             ssd_lock: Arc::new(tokio::sync::Mutex::new(())),
+            download_lock: Arc::new(tokio::sync::Mutex::new(())),
         })))
         .setup(move |app| {
             log::info!("UAV PC application started");
@@ -179,6 +181,9 @@ pub fn run() {
             commands::query_gps_files,
             commands::download_ssd_file,
             commands::cancel_ssd_download,
+            commands::list_sd_files,
+            commands::download_sd_file,
+            commands::cancel_sd_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

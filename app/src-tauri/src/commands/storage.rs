@@ -419,7 +419,7 @@ pub struct SsdDownloadProgress {
 }
 
 /// 清理文件名中的路径分隔符和 Windows 非法字符
-fn sanitize_filename(name: &str) -> String {
+pub fn sanitize_filename(name: &str) -> String {
     let sanitized: String = name
         .chars()
         .map(|c| {
@@ -454,7 +454,7 @@ fn chunk_sectors_from_mb(chunk_mb: u32) -> Result<u64, String> {
 }
 
 /// 目标目录下生成不重名的文件路径
-fn unique_path(dir: &Path, name: &str) -> PathBuf {
+pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let candidate = dir.join(name);
     if !candidate.exists() {
         return candidate;
@@ -641,6 +641,7 @@ pub async fn download_ssd_file(
     local_dir: String,
     channel: Channel<SsdDownloadProgress>,
 ) -> Result<String, String> {
+    let _download = try_acquire_download_lock(&app).await?;
     let _ssd = try_acquire_ssd_lock(&app).await?;
 
     // 分块大小由 config.toml 的 [ssd].chunk_mb 指定，仅支持 1/2/4 MB
