@@ -53,35 +53,20 @@ Tauri 会把 `dist/` 内嵌进 exe，因此必须在 cargo 编译前完成。
 ### 3. 交叉编译
 
 ```bash
-cd app/src-tauri
 
-# llvm-rc 在部分发行版中带版本后缀（如 llvm-rc-14），这里做一次临时软链接
-mkdir -p /tmp/uav-xwin-bin
-ln -sf "$(command -v llvm-rc || command -v llvm-rc-14)" /tmp/uav-xwin-bin/llvm-rc
+cd ~/work/uav_pc/app
+RC=/usr/bin/llvm-rc-14 npx tauri build \
+  --target x86_64-pc-windows-msvc \
+  --runner cargo-xwin \
+  --no-bundle
 
-PATH=/tmp/uav-xwin-bin:$PATH \
-RUSTFLAGS="-C target-feature=+crt-static" \
-cargo xwin build --release --target x86_64-pc-windows-msvc
-```
-
-也可以直接运行脚本：
-
-```bash
-cd app
-./scripts/build-windows.sh
+RC=/usr/bin/llvm-rc-14 npx tauri build --target x86_64-pc-windows-msvc --runner cargo-xwin --no-bundle
 ```
 
 ### 4. 产物位置
 
 ```text
 app/src-tauri/target/x86_64-pc-windows-msvc/release/uav-pc.exe
-```
-
-确认产物类型：
-
-```bash
-file app/src-tauri/target/x86_64-pc-windows-msvc/release/uav-pc.exe
-# PE32+ executable (GUI) x86-64, for MS Windows
 ```
 
 ## Windows 端使用

@@ -24,3 +24,9 @@ target
 
 # 运行期生成的温度历史
 temperature_history.json
+
+# Tauri 自动生成、桌面端用不到的图标（需要时可重新 npx tauri icon 生成）
+app/src-tauri/icons/android/
+app/src-tauri/icons/ios/
+app/src-tauri/icons/Square*Logo.png
+app/src-tauri/icons/StoreLogo.png
