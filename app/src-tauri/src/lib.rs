@@ -64,6 +64,11 @@ async fn background_udp_listener(
                         match status::SystemStatus::parse(&frame.data) {
                             Ok(sys_status) => {
                                 log::debug!("Received system status from {}", addr);
+                                {
+                                    let state = app.state::<Arc<Mutex<NetworkState>>>();
+                                    let mut guard = state.lock().await;
+                                    guard.last_status = Some(sys_status.clone());
+                                }
                                 let _ = app.emit("sys-status-update", sys_status);
                             }
                             Err(e) => {
@@ -132,6 +137,7 @@ pub fn run() {
     let frame_tx_setup = frame_tx.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(app_config)
         .manage(Arc::new(Mutex::new(NetworkState {
             network: None,
@@ -141,6 +147,8 @@ pub fn run() {
             preview_channel: None,
             frame_tx: frame_tx.clone(),
             op_lock: Arc::new(tokio::sync::Mutex::new(())),
+            last_status: None,
+            ssd_lock: Arc::new(tokio::sync::Mutex::new(())),
         })))
         .setup(move |app| {
             log::info!("UAV PC application started");
@@ -169,6 +177,8 @@ pub fn run() {
             commands::list_ssd_files,
             commands::set_ssd_store,
             commands::query_gps_files,
+            commands::download_ssd_file,
+            commands::cancel_ssd_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

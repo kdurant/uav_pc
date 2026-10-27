@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
+import type { SsdDownloadState } from "../types";
 
 interface DrawerFile {
     name: string;
@@ -15,11 +16,21 @@ const props = defineProps<{
     loading: boolean;
     error: string;
     files: DrawerFile[];
+    /** 当前下载状态；null 表示没有下载任务 */
+    download?: SsdDownloadState | null;
+    /** 是否允许下载（连接正常、未存储、无并发任务） */
+    canDownload?: boolean;
+    /** 下载失败/取消提示 */
+    downloadError?: string;
+    /** 下载完成提示 */
+    downloadMessage?: string;
 }>();
 
 const emit = defineEmits<{
     (e: "close"): void;
     (e: "refresh"): void;
+    (e: "download", file: DrawerFile): void;
+    (e: "cancel-download"): void;
 }>();
 
 /** 字节数格式化为易读单位 */
@@ -28,6 +39,12 @@ function formatSize(bytes: number): string {
     if (bytes >= 1024 ** 2) return (bytes / 1024 ** 2).toFixed(1) + " MB";
     if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KB";
     return bytes + " B";
+}
+
+/** 下载速度格式化 */
+function formatSpeed(bytesPerSec: number): string {
+    if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "--";
+    return `${(bytesPerSec / 1024 / 1024).toFixed(1)} MB/s`;
 }
 
 const totalSize = computed(() =>
@@ -67,6 +84,38 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                     </header>
 
                     <div class="drawer-body">
+                        <!-- 下载进度 -->
+                        <div v-if="download" class="download-panel">
+                            <div class="download-head">
+                                <span class="download-name" :title="download.name">{{ download.name }}</span>
+                                <span class="download-size">
+                                    {{ formatSize(download.transferred) }} / {{ formatSize(download.total) }}
+                                </span>
+                            </div>
+                            <div class="progress-track">
+                                <div
+                                    class="progress-fill"
+                                    :style="{ width: Math.min(100, Math.max(0, download.percent)) + '%' }"
+                                ></div>
+                            </div>
+                            <div class="download-foot">
+                                <span>{{ download.percent.toFixed(1) }}%</span>
+                                <span class="download-speed">
+                                    {{ formatSpeed(download.speed_bps) }}
+                                    <template v-if="download.chunk_mb"> · {{ download.chunk_mb }}MB/块</template>
+                                </span>
+                                <button
+                                    class="row-btn"
+                                    :disabled="download.cancelling"
+                                    @click="emit('cancel-download')"
+                                >
+                                    {{ download.cancelling ? "取消中..." : "取消" }}
+                                </button>
+                            </div>
+                        </div>
+                        <p v-if="downloadError" class="download-msg error">{{ downloadError }}</p>
+                        <p v-if="downloadMessage" class="download-msg success">{{ downloadMessage }}</p>
+
                         <!-- 加载中 -->
                         <div v-if="loading" class="state">
                             <span class="spinner"></span>
@@ -104,6 +153,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                                             <th class="col-num">起始地址</th>
                                             <th class="col-num">结束地址</th>
                                             <th class="col-num">大小</th>
+                                            <th class="col-action">操作</th>
                                         </template>
                                     </tr>
                                 </thead>
@@ -114,6 +164,15 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                                             <td class="col-num">{{ f.start }}</td>
                                             <td class="col-num">{{ f.end }}</td>
                                             <td class="col-num">{{ formatSize(f.size ?? 0) }}</td>
+                                            <td class="col-action">
+                                                <button
+                                                    class="row-btn"
+                                                    :disabled="!canDownload || !!download || (f.end ?? 0) <= (f.start ?? 0)"
+                                                    @click="emit('download', f)"
+                                                >
+                                                    下载
+                                                </button>
+                                            </td>
                                         </template>
                                     </tr>
                                 </tbody>
@@ -127,7 +186,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                             <template v-else>路径：/run/media/mmcblk1p1/（可在 config.toml [gps].dir 修改）</template>
                         </span>
                         <div class="foot-actions">
-                            <button :disabled="loading" @click="emit('refresh')">重新检索</button>
+                            <button :disabled="loading || !!download" @click="emit('refresh')">重新检索</button>
                             <button class="accent" @click="emit('close')">关闭</button>
                         </div>
                     </footer>
@@ -213,6 +272,112 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+/* 下载进度 */
+.download-panel {
+    flex-shrink: 0;
+    margin: 12px 16px 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-inset);
+}
+
+.download-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+}
+
+.download-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.download-size {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+    font-size: 11.5px;
+}
+
+.progress-track {
+    height: 6px;
+    margin: 8px 0 6px;
+    background: #e4e9f2;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #6ea0ff, var(--accent));
+    transition: width 0.15s linear;
+}
+
+.download-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.download-speed {
+    color: var(--text-tertiary);
+}
+
+.download-msg {
+    flex-shrink: 0;
+    margin: 10px 16px 0;
+    font-size: 12px;
+    word-break: break-all;
+}
+
+.download-msg.error {
+    color: #b42318;
+}
+
+.download-msg.success {
+    color: #0e6b3c;
+}
+
+.file-table .col-action {
+    width: 72px;
+    text-align: right;
+}
+
+.row-btn {
+    padding: 3px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--accent);
+    font-size: 11.5px;
+    font-family: inherit;
+    line-height: 1.5;
+    cursor: pointer;
+}
+
+.row-btn:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: #bcd0f8;
+}
+
+.row-btn:disabled {
+    background: var(--bg-inset);
+    color: var(--text-tertiary);
+    cursor: not-allowed;
 }
 
 /* 状态占位 */

@@ -44,6 +44,26 @@ fn default_gps_dir() -> String {
     "/run/media/mmcblk1p1/".to_string()
 }
 
+/// SSD 文件下载配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SsdConfig {
+    /// TCP 下载分块大小（MB），仅支持 1、2、4
+    #[serde(default = "default_ssd_chunk_mb")]
+    pub chunk_mb: u32,
+}
+
+fn default_ssd_chunk_mb() -> u32 {
+    1
+}
+
+impl Default for SsdConfig {
+    fn default() -> Self {
+        Self {
+            chunk_mb: default_ssd_chunk_mb(),
+        }
+    }
+}
+
 /// 板载温度历史配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemperatureConfig {
@@ -75,6 +95,9 @@ pub struct AppConfig {
     /// GPS 配置；老配置文件缺省时使用默认值
     #[serde(default)]
     pub gps: GpsConfig,
+    /// SSD 下载配置；老配置文件缺省时使用默认值
+    #[serde(default)]
+    pub ssd: SsdConfig,
     /// 板载温度历史配置；老配置文件缺省时使用默认值
     #[serde(default)]
     pub temperature: TemperatureConfig,
@@ -116,6 +139,7 @@ impl Default for AppConfig {
             basic: BasicConfig::default(),
             capture: CaptureConfig::default(),
             gps: GpsConfig::default(),
+            ssd: SsdConfig::default(),
             temperature: TemperatureConfig::default(),
         }
     }
@@ -193,6 +217,17 @@ pin_threshold = 1000
         assert_eq!(config.basic.device_ip, "");
         assert_eq!(config.temperature.save_points, 180);
         assert_eq!(config.temperature.display_points, 180);
+        assert_eq!(config.ssd.chunk_mb, 1);
+    }
+
+    #[test]
+    fn test_ssd_chunk_mb_from_config() {
+        let toml = format!(
+            "[basic]\nlocal_ip = \"192.168.1.111\"\nlocal_port = 12345\nremote_port = 6666\n[ssd]\nchunk_mb = 4\n{}",
+            CAPTURE
+        );
+        let config: AppConfig = toml::from_str(&toml).unwrap();
+        assert_eq!(config.ssd.chunk_mb, 4);
     }
 
     #[test]

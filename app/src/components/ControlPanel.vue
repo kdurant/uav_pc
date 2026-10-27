@@ -82,6 +82,7 @@ function selectTab(key: string) {
       v-show="activeTab === 'storage'"
       :connected="connected"
       :device-ip="deviceIp"
+      :status="status"
     />
   </div>
 </template>

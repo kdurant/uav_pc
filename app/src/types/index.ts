@@ -155,6 +155,28 @@ export interface SsdFile {
     size: number;
 }
 
+/** SSD 下载进度（对应 Rust SsdDownloadProgress） */
+export interface SsdDownloadProgress {
+    /** 已传输字节数 */
+    transferred: number;
+    /** 文件总字节数 */
+    total: number;
+    /** 0~100 */
+    percent: number;
+    /** 实时速度（字节/秒） */
+    speed_bps: number;
+    /** 当前分块大小（MB） */
+    chunk_mb: number;
+}
+
+/** 前端下载状态 */
+export interface SsdDownloadState extends SsdDownloadProgress {
+    /** 正在下载的文件名 */
+    name: string;
+    /** 用户已点击取消，等待当前块结束 */
+    cancelling: boolean;
+}
+
 /** 连接状态 */
 export enum ConnectionState {
     Disconnected = "disconnected",

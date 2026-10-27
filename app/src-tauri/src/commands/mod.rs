@@ -64,6 +64,10 @@ pub struct NetworkState {    pub network: Option<Arc<UdpNetwork>>,
     /// 请求-响应类命令（激光器/电机透传）的串行化锁。
     /// 这些命令需要独占 UDP 应答通道，避免两个操作互相收到对方的响应。
     pub op_lock: Arc<tokio::sync::Mutex<()>>,
+    /// 最近一次系统状态：SSD 下载前用于检查存储/SATA 状态
+    pub last_status: Option<crate::status::SystemStatus>,
+    /// SSD 相关操作（文件列表/存储/下载）的串行化锁
+    pub ssd_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// 获取或初始化 NetworkState
@@ -351,6 +355,29 @@ async fn acquire_op_lock(app: &AppHandle) -> tokio::sync::OwnedMutexGuard<()> {
     lock.lock_owned().await
 }
 
+/// 获取 SSD 操作串行锁（文件列表/存储/下载）
+async fn acquire_ssd_lock(app: &AppHandle) -> tokio::sync::OwnedMutexGuard<()> {
+    let lock = {
+        let state = app.state::<Arc<Mutex<NetworkState>>>();
+        let guard = state.lock().await;
+        guard.ssd_lock.clone()
+    };
+    lock.lock_owned().await
+}
+
+/// 尝试获取 SSD 操作锁；已有操作时直接返回错误，避免下载排队
+async fn try_acquire_ssd_lock(
+    app: &AppHandle,
+) -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
+    let lock = {
+        let state = app.state::<Arc<Mutex<NetworkState>>>();
+        let guard = state.lock().await;
+        guard.ssd_lock.clone()
+    };
+    lock.try_lock_owned()
+        .map_err(|_| "已有 SSD 操作进行中，请稍后再试".to_string())
+}
+
 /// 订阅后台监听器转发的帧
 async fn subscribe_frames(app: &AppHandle) -> broadcast::Receiver<(Frame, SocketAddr)> {
     let state = app.state::<Arc<Mutex<NetworkState>>>();
@@ -437,6 +464,9 @@ pub async fn query_sys_status(
         guard.seq_counter = guard.seq_counter.wrapping_add(1);
         if enable {
             guard.connected_device = Some(target);
+        } else {
+            guard.connected_device = None;
+            guard.last_status = None;
         }
         seq
     };

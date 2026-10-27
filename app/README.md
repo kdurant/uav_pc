@@ -61,11 +61,15 @@ device_ip = ""
 温度历史配置：
 
 ```toml
+[ssd]
+chunk_mb = 1
+
 [temperature]
 save_points = 180
 display_points = 180
 ```
 
+- `chunk_mb`：SSD 文件 TCP 下载分块大小（MB），仅支持 1、2、4，修改后需重启
 - `save_points`：历史温度文件最多保存的点数（每 10 秒一点，180 点约 30 分钟）
 - `display_points`：温度曲线最多显示的点数
 

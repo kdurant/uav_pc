@@ -1,6 +1,12 @@
-//! SSD（0x0400/0x0402/0x0403/0x0406）与 GPS 文件（0x0110）操作。
+//! SSD（0x0400/0x0401/0x0402/0x0403/0x0406）与 GPS 文件（0x0110）操作。
 
 use super::*;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+use tauri::ipc::Channel;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 /// 解析名称扇区：前 32 字节为文件名（不足用 0x00 填充，其余用 0xee 填充）。
 /// 全为填充字节或非可打印字符时视为空条目。
@@ -170,7 +176,7 @@ async fn scan_ssd_directory(
 /// 检索 SSD 已存储文件：逐条目读取文件表（0x0400），返回文件名/起始/结束/大小
 #[tauri::command]
 pub async fn list_ssd_files(app: AppHandle, device_ip: String) -> Result<Vec<SsdFile>, String> {
-    let _op = acquire_op_lock(&app).await;
+    let _ssd = acquire_ssd_lock(&app).await;
     let network = get_or_init_network(&app).await?;
 
     let config = app.state::<AppConfig>();
@@ -202,7 +208,7 @@ pub async fn set_ssd_store(
     enable: bool,
     filename: Option<String>,
 ) -> Result<(), String> {
-    let _op = acquire_op_lock(&app).await;
+    let _ssd = acquire_ssd_lock(&app).await;
     let network = get_or_init_network(&app).await?;
 
     let config = app.state::<AppConfig>();
@@ -391,11 +397,339 @@ pub async fn query_gps_files(app: AppHandle, device_ip: String) -> Result<Vec<St
     Ok(files)
 }
 
+// ========== SSD 文件 TCP 下载（0x0401） ==========
+
+/// 单块 TCP 读取超时
+const SSD_TCP_READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// TCP 连接后等待设备 accept 的时间
+const SSD_TCP_ACCEPT_WAIT: Duration = Duration::from_millis(300);
+/// 取消标记：只在块边界检查，避免设备正在 write 时强断 TCP
+static SSD_DOWNLOAD_CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// SSD 下载进度
+#[derive(Clone, serde::Serialize)]
+pub struct SsdDownloadProgress {
+    pub transferred: u64,
+    pub total: u64,
+    pub percent: f64,
+    /// 实时速度（字节/秒）
+    pub speed_bps: f64,
+    /// 当前分块大小（MB）
+    pub chunk_mb: u32,
+}
+
+/// 清理文件名中的路径分隔符和 Windows 非法字符
+fn sanitize_filename(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control()
+                || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = sanitized.trim().trim_matches('.').to_string();
+    if trimmed.is_empty() {
+        "ssd_file".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// 配置的分块大小（MB）转换为扇区数；仅支持 1/2/4 MB
+fn chunk_sectors_from_mb(chunk_mb: u32) -> Result<u64, String> {
+    match chunk_mb {
+        1 => Ok(2048),
+        2 => Ok(4096),
+        4 => Ok(8192),
+        other => Err(format!(
+            "config.toml [ssd].chunk_mb 只能设置为 1、2 或 4，当前为 {}",
+            other
+        )),
+    }
+}
+
+/// 目标目录下生成不重名的文件路径
+fn unique_path(dir: &Path, name: &str) -> PathBuf {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let path = Path::new(name);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("ssd_file");
+    let ext = path.extension().and_then(|s| s.to_str());
+    for i in 1..10_000 {
+        let file = match ext {
+            Some(ext) => format!("{}_{}.{}", stem, i, ext),
+            None => format!("{}_{}", stem, i),
+        };
+        let candidate = dir.join(file);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!("{}_{}", stem, std::process::id()))
+}
+
+/// 建立 TCP 连接，并等待设备完成 accept
+async fn connect_tcp(ip: std::net::IpAddr, port: u16) -> Result<TcpStream, String> {
+    let stream = TcpStream::connect((ip, port))
+        .await
+        .map_err(|e| format!("TCP 连接 {}:{} 失败: {}", ip, port, e))?;
+    let _ = stream.set_nodelay(true);
+    tokio::time::sleep(SSD_TCP_ACCEPT_WAIT).await;
+    Ok(stream)
+}
+
+/// 执行下载：按配置的分块大小发送 0x0401，并逐块读取 TCP 数据
+async fn download_ssd_file_inner(
+    app: &AppHandle,
+    network: &Arc<UdpNetwork>,
+    target: SocketAddr,
+    start_lba: u64,
+    total_sectors: u64,
+    total_bytes: u64,
+    chunk_sectors: u64,
+    part_path: &Path,
+    final_path: &Path,
+    channel: &Channel<SsdDownloadProgress>,
+) -> Result<String, String> {
+    let mut file = tokio::fs::File::create(part_path)
+        .await
+        .map_err(|e| format!("创建临时文件失败（{}）: {}", part_path.display(), e))?;
+
+    let mut stream: Option<TcpStream> = None;
+    let mut transferred: u64 = 0;
+    let mut speed_bps: f64 = 0.0;
+    let mut cancelled = false;
+    let chunk_mb = (chunk_sectors / 2048) as u32;
+
+    channel
+        .send(SsdDownloadProgress {
+            transferred: 0,
+            total: total_bytes,
+            percent: 0.0,
+            speed_bps: 0.0,
+            chunk_mb,
+        })
+        .map_err(|e| format!("发送下载进度失败: {}", e))?;
+
+    while transferred < total_bytes {
+        if SSD_DOWNLOAD_CANCEL.load(Ordering::SeqCst) {
+            cancelled = true;
+            break;
+        }
+
+        let done_sectors = transferred / SSD_SECTOR_SIZE;
+        let remaining = total_sectors.saturating_sub(done_sectors);
+        if remaining == 0 {
+            break;
+        }
+        let sectors = remaining.min(chunk_sectors);
+        let chunk_bytes = (sectors * SSD_SECTOR_SIZE) as usize;
+        let mut chunk_start = std::time::Instant::now();
+        let mut buf = vec![0u8; chunk_bytes];
+        let mut attempt = 0u32;
+
+        loop {
+            attempt += 1;
+            if stream.is_none() {
+                stream = Some(connect_tcp(target.ip(), target.port()).await?);
+            }
+            // 只统计实际传输时间，不把 TCP accept 等待和重试时间算进速度
+            chunk_start = std::time::Instant::now();
+
+            let mut data = Vec::with_capacity(19);
+            data.extend_from_slice(&(start_lba + done_sectors).to_be_bytes());
+            data.extend_from_slice(&sectors.to_be_bytes());
+            // 单次 DMA 扇区数保持文档默认的 2048（1MB），大块由 SATA 核分多次搬运
+            data.extend_from_slice(&(sectors.min(2048) as u16).to_be_bytes());
+            data.push(0x01); // TCP 返回
+            send_frame(app, network, target, 0x0401, data).await?;
+
+            let result = tokio::time::timeout(
+                SSD_TCP_READ_TIMEOUT,
+                stream.as_mut().unwrap().read_exact(&mut buf),
+            )
+            .await;
+
+            match result {
+                Ok(Ok(_)) => break,
+                Ok(Err(e)) => log::warn!(
+                    "读取 SSD 扇区 {} 失败（第 {} 次）: {}",
+                    start_lba + done_sectors,
+                    attempt,
+                    e
+                ),
+                Err(_) => log::warn!(
+                    "读取 SSD 扇区 {} 超时（第 {} 次）",
+                    start_lba + done_sectors,
+                    attempt
+                ),
+            }
+
+            // 连接上可能残留半包数据，重连后从同一扇区重读
+            stream = None;
+            if attempt >= 3 {
+                return Err(format!(
+                    "读取扇区 {} 失败（已重试 {} 次）",
+                    start_lba + done_sectors,
+                    attempt
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+
+        file.write_all(&buf)
+            .await
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+        transferred += chunk_bytes as u64;
+
+        // 当前块速度做指数平滑，避免进度条数值跳动过大
+        let elapsed = chunk_start.elapsed().as_secs_f64();
+        let instant_speed = if elapsed > 0.0 {
+            chunk_bytes as f64 / elapsed
+        } else {
+            0.0
+        };
+        speed_bps = if speed_bps > 0.0 {
+            speed_bps * 0.7 + instant_speed * 0.3
+        } else {
+            instant_speed
+        };
+
+        let percent = transferred as f64 / total_bytes as f64 * 100.0;
+        channel
+            .send(SsdDownloadProgress {
+                transferred,
+                total: total_bytes,
+                percent,
+                speed_bps,
+                chunk_mb,
+            })
+            .map_err(|e| format!("发送下载进度失败: {}", e))?;
+    }
+
+    file.flush()
+        .await
+        .map_err(|e| format!("刷新文件失败: {}", e))?;
+    drop(file);
+
+    if cancelled {
+        return Err("下载已取消".into());
+    }
+
+    tokio::fs::rename(part_path, final_path)
+        .await
+        .map_err(|e| format!("重命名下载文件失败: {}", e))?;
+    Ok(final_path.to_string_lossy().to_string())
+}
+
+/// 通过 TCP 下载 SSD 文件（分块大小由 config.toml [ssd].chunk_mb 指定）
+#[tauri::command]
+pub async fn download_ssd_file(
+    app: AppHandle,
+    device_ip: String,
+    start_lba: u64,
+    total_sectors: u64,
+    filename: String,
+    local_dir: String,
+    channel: Channel<SsdDownloadProgress>,
+) -> Result<String, String> {
+    let _ssd = try_acquire_ssd_lock(&app).await?;
+
+    // 分块大小由 config.toml 的 [ssd].chunk_mb 指定，仅支持 1/2/4 MB
+    let chunk_mb = app.state::<AppConfig>().ssd.chunk_mb;
+    let chunk_sectors = chunk_sectors_from_mb(chunk_mb)?;
+
+    if total_sectors == 0 {
+        return Err("文件大小为 0，无法下载".into());
+    }
+    let total_bytes = total_sectors
+        .checked_mul(SSD_SECTOR_SIZE)
+        .ok_or_else(|| "文件大小溢出".to_string())?;
+    if start_lba < SSD_DATA_START {
+        return Err("文件起始扇区不在 SSD 数据区".into());
+    }
+    let end_lba = start_lba
+        .checked_add(total_sectors)
+        .ok_or_else(|| "文件扇区范围溢出".to_string())?;
+
+    // 下载前检查最近一次状态：存储中或 SATA 未连接时拒绝
+    let status = {
+        let state = app.state::<Arc<Mutex<NetworkState>>>();
+        let guard = state.lock().await;
+        guard.last_status.clone()
+    };
+    let Some(st) = status.as_ref() else {
+        return Err("未获取到设备状态，请先开启设备状态读取".into());
+    };
+    if st.ssd_store_enable == 1 {
+        return Err("设备正在存储，请先停止存储后再下载".into());
+    }
+    if st.sata_dev_identify_done != 1 {
+        return Err("SATA 未连接，无法下载".into());
+    }
+    if st.sata_dev_tot_sec_num > 0 && end_lba > st.sata_dev_tot_sec_num {
+        return Err("文件范围超出硬盘容量".into());
+    }
+
+    let dir = Path::new(&local_dir);
+    if !dir.is_dir() {
+        return Err(format!("保存目录不存在: {}", local_dir));
+    }
+
+    let safe_name = sanitize_filename(&filename);
+    let part_path = dir.join(format!("{}.part", safe_name));
+    let final_path = unique_path(dir, &safe_name);
+
+    let port = app.state::<AppConfig>().basic.remote_port;
+    let ip: std::net::IpAddr = device_ip
+        .parse()
+        .map_err(|e| format!("设备 IP 非法 {}: {}", device_ip, e))?;
+    let target = SocketAddr::new(ip, port);
+    let network = get_or_init_network(&app).await?;
+
+    // 必须在获取到 SSD 锁之后再重置，避免取消正在运行的其他下载
+    SSD_DOWNLOAD_CANCEL.store(false, Ordering::SeqCst);
+
+    let result = download_ssd_file_inner(
+        &app,
+        &network,
+        target,
+        start_lba,
+        total_sectors,
+        total_bytes,
+        chunk_sectors,
+        &part_path,
+        &final_path,
+        &channel,
+    )
+    .await;
+
+    // 取消或失败时删除临时文件，不保留断点
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&part_path).await;
+    }
+    result
+}
+
+/// 取消当前 SSD 下载：在下一个 1MB 块边界生效
+#[tauri::command]
+pub fn cancel_ssd_download() {
+    SSD_DOWNLOAD_CANCEL.store(true, Ordering::SeqCst);
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        build_gps_list_command, build_ssd_name_sector, parse_gps_files, parse_ssd_name,
-        shell_quote, GPS_NO_SD_MARKER,
+        build_gps_list_command, build_ssd_name_sector, chunk_sectors_from_mb, parse_gps_files,
+        parse_ssd_name, sanitize_filename, shell_quote, GPS_NO_SD_MARKER,
     };
 
     #[test]
@@ -472,5 +806,22 @@ mod tests {
         ])
         .unwrap_err();
         assert!(err.contains("读取 GPS 目录失败"));
+    }
+
+    #[test]
+    fn test_chunk_sectors_from_mb() {
+        assert_eq!(chunk_sectors_from_mb(1).unwrap(), 2048);
+        assert_eq!(chunk_sectors_from_mb(2).unwrap(), 4096);
+        assert_eq!(chunk_sectors_from_mb(4).unwrap(), 8192);
+        assert!(chunk_sectors_from_mb(3).is_err());
+        assert!(chunk_sectors_from_mb(0).is_err());
+    }
+
+    #[test]
+    fn test_sanitize_filename() {
+        assert_eq!(sanitize_filename("uav_20261023_085416"), "uav_20261023_085416");
+        assert_eq!(sanitize_filename("a/b:c*?\"<>|"), "a_b_c______");
+        assert_eq!(sanitize_filename(".."), "ssd_file");
+        assert_eq!(sanitize_filename("   "), "ssd_file");
     }
 }
