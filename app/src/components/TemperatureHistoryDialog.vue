@@ -23,6 +23,21 @@ function fmtTime(ts: number): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
+function fmtDate(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function isSameDay(a: number, b: number): boolean {
+  const da = new Date(a);
+  const db = new Date(b);
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
 function draw() {
   const canvas = canvasRef.value;
   if (!canvas) return;
@@ -40,9 +55,7 @@ function draw() {
   const padL = 48;
   const padR = 16;
   const padT = 16;
-  const padB = 30;
   const plotW = WIDTH - padL - padR;
-  const plotH = HEIGHT - padT - padB;
 
   if (!props.points.length) {
     ctx.fillStyle = "#9aa4b2";
@@ -67,10 +80,14 @@ function draw() {
   }
 
   const t0 = props.points[0].time;
-  const t1 = props.points[props.points.length - 1].time;
-  const span = Math.max(t1 - t0, 10_000);
+  const n = props.points.length;
+  const crossDay = props.points.some((p) => !isSameDay(p.time, t0));
+  const padB = crossDay ? 44 : 30;
+  const plotH = HEIGHT - padT - padB;
 
-  const xOf = (time: number) => padL + ((time - t0) / span) * plotW;
+  // 按采样点序号等距绘制：数据中断（程序未运行）时不会在曲线上留下过大的空档
+  const xOf = (index: number) =>
+    n <= 1 ? padL + plotW / 2 : padL + (index / (n - 1)) * plotW;
   const yOf = (temp: number) => padT + (1 - (temp - tMin) / (tMax - tMin)) * plotH;
 
   // 横向网格与温度刻度
@@ -92,9 +109,8 @@ function draw() {
   }
 
   // 纵向网格与时间刻度
-  ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  const xTicks = 4;
+  const xTicks = Math.min(4, Math.max(1, n - 1));
   for (let i = 0; i <= xTicks; i++) {
     const x = padL + (plotW * i) / xTicks;
     ctx.strokeStyle = "#f1f4f8";
@@ -103,10 +119,38 @@ function draw() {
     ctx.lineTo(x, padT + plotH);
     ctx.stroke();
 
-    const time = t0 + (span * i) / xTicks;
+    // 刻度标签取该位置最近的采样点的真实时间
+    const idx = n <= 1 ? 0 : Math.min(n - 1, Math.round(((n - 1) * i) / xTicks));
+    const time = props.points[idx].time;
     ctx.fillStyle = "#8a94a6";
-    ctx.fillText(fmtTime(time), x, padT + plotH + 8);
+    // 首尾刻度靠边对齐，避免标签超出画布
+    ctx.textAlign = i === 0 ? "left" : i === xTicks ? "right" : "center";
+    if (crossDay) {
+      // 数据跨天时补上日期，日期与时间分两行显示
+      ctx.fillText(fmtDate(time), x, padT + plotH + 6);
+      ctx.fillText(fmtTime(time), x, padT + plotH + 20);
+    } else {
+      ctx.fillText(fmtTime(time), x, padT + plotH + 8);
+    }
   }
+
+  // 时间不连续处用垂直虚线标记：相邻点间隔超过 3 个采样周期视为中断
+  const GAP_THRESHOLD_MS = 30_000;
+  ctx.save();
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = "#f59e0b";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < n; i++) {
+    const delta = props.points[i].time - props.points[i - 1].time;
+    if (delta > GAP_THRESHOLD_MS || delta < 0) {
+      const x = (xOf(i - 1) + xOf(i)) / 2;
+      ctx.beginPath();
+      ctx.moveTo(x, padT);
+      ctx.lineTo(x, padT + plotH);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 
   // 温度曲线
   ctx.strokeStyle = "#2563eb";
@@ -115,18 +159,18 @@ function draw() {
   ctx.lineCap = "round";
   ctx.beginPath();
   props.points.forEach((p, i) => {
-    const x = xOf(p.time);
+    const x = xOf(i);
     const y = yOf(p.temp);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
 
-  // 采样点：以圆点形式显示
-  ctx.fillStyle = "#2563eb";
-  props.points.forEach((p) => {
+  // 采样点：以红色圆点形式显示
+  ctx.fillStyle = "#dc2626";
+  props.points.forEach((p, i) => {
     ctx.beginPath();
-    ctx.arc(xOf(p.time), yOf(p.temp), 2, 0, Math.PI * 2);
+    ctx.arc(xOf(i), yOf(p.temp), 2, 0, Math.PI * 2);
     ctx.fill();
   });
 }
