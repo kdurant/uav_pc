@@ -3,5 +3,6 @@ title = "uav_doc"
 authors = ["kdurant"]
 language = "en"
 
-[preprocessor.katex]
-after = ["links"]
+[output.html]
+mathjax-support = true
+additional-js = ["mermaid-init.js"]

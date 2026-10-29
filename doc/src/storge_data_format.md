@@ -56,5 +56,5 @@
 
 - 采样帧长度计算：
 $$
-frame\_len = 128+8*first{\_}len + secondlen * 2 + 4 * 4 
+\mathrm{frameLen} = 128 + 8 \times \mathrm{firstLen} + \mathrm{secondLen} \times 2 + 4 \times 4
 $$
