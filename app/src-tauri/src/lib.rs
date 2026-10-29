@@ -13,6 +13,7 @@ mod motor;
 mod network;
 mod preview;
 mod protocol;
+mod replay;
 mod status;
 
 /// 预览数据推送到前端的最大频率（30Hz）。
@@ -140,6 +141,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(app_config)
+        .manage(commands::ReplayState::default())
         .manage(Arc::new(Mutex::new(NetworkState {
             network: None,
             connected_device: None,
@@ -184,6 +186,9 @@ pub fn run() {
             commands::list_sd_files,
             commands::download_sd_file,
             commands::cancel_sd_download,
+            commands::open_replay_file,
+            commands::read_replay_frame,
+            commands::close_replay_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

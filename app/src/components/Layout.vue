@@ -10,6 +10,8 @@ import StatusPanel from "./StatusPanel.vue";
 import ChartView from "./ChartView.vue";
 import ControlPanel from "./ControlPanel.vue";
 import TriggerModeDialog from "./TriggerModeDialog.vue";
+import ReplayBar from "./ReplayBar.vue";
+import { useReplay } from "../composables/useReplay";
 import { ConnectionState } from "../types";
 import type { PreviewFrame } from "../types";
 
@@ -19,6 +21,16 @@ const { devices, isSearching, selectedDevice, searchDevices, selectDevice, clear
 const { status, stale: statusStale, start: startStatus, stop: stopStatus } = useSystemStatus();
 
 const toast = useToast();
+
+// 离线数据回放：与实时预览共用中间图表，二者互斥
+const {
+  active: replayActive,
+  info: replayInfo,
+  gps: replayGps,
+  enter: enterReplay,
+  exit: exitReplay,
+  setSink: setReplaySink,
+} = useReplay();
 
 const connectionState = ref<ConnectionState>(ConnectionState.Disconnected);
 const showDeviceSelector = ref(false);
@@ -43,6 +55,9 @@ function clearPreviewSubTime() {
 
 // Preview data → ChartView（整帧、按绝对采样位置对齐）+ 细分时间
 function pushPreviewFrame(series: number[][], frame: PreviewFrame) {
+  // 回放模式与实时预览互斥，实时帧不上屏，避免两路数据互相覆盖
+  if (replayActive.value) return;
+
   chartRef.value?.setFrame(series);
 
   // 细分时间不需要跟 30Hz 帧率刷新，限频到 10Hz，避免状态面板频繁重绘
@@ -54,6 +69,30 @@ function pushPreviewFrame(series: number[][], frame: PreviewFrame) {
 }
 
 const previewOutput = usePreviewData(pushPreviewFrame);
+
+// 回放帧出口：与实时帧共用同一个图表实例
+setReplaySink((series) => {
+  if (series) chartRef.value?.setFrame(series);
+  else chartRef.value?.clear();
+});
+
+// 回放与实时预览互斥：进入回放时停掉实时帧通道，退出时按连接状态恢复
+watch(replayActive, (on) => {
+  if (on) {
+    previewOutput.stop();
+    clearPreviewSubTime();
+  } else if (connectionState.value === ConnectionState.Connected) {
+    previewOutput.start();
+  }
+});
+
+// 连上设备后实时预览优先，自动退出回放
+watch(connectionState, (state) => {
+  if (state === ConnectionState.Connected && replayActive.value) {
+    exitReplay();
+    toast.info("已退出离线回放", "设备已连接，恢复实时预览");
+  }
+});
 
 // 断开连接或设备停止上传预览时清空细分时间
 watch(connectionState, (state) => {
@@ -296,6 +335,19 @@ handleSearch();
       </div>
 
       <div class="toolbar-right">
+        <button
+          class="replay-btn"
+          :class="{ active: replayActive }"
+          :title="replayActive ? '退出离线回放，恢复实时预览' : '按帧回放本地采集数据文件'"
+          @click="replayActive ? exitReplay() : enterReplay()"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 5v14l9-7-9-7z" />
+            <path d="M14 5h2v14h-2z" />
+          </svg>
+          {{ replayActive ? "退出回放" : "离线回放" }}
+        </button>
         <div class="conn-pill" :class="connectionClass">
           <span class="conn-dot"></span>
           <span class="conn-label">{{ statusLabel }}</span>
@@ -344,12 +396,15 @@ handleSearch();
       <main class="panel panel-center">
         <div class="panel-header">
           <span class="panel-title">数据预览</span>
-          <span class="panel-tag">实时波形 · 4 CH</span>
+          <span class="panel-tag" :class="{ replay: replayActive, live: !replayActive && connectionState === ConnectionState.Connected }">
+            {{ replayActive ? `离线回放 · ${replayInfo ? replayInfo.frame_count.toLocaleString("zh-CN") + " 帧" : "未选择文件"}` : "实时波形 · 4 CH" }}
+          </span>
         </div>
         <div class="panel-body chart-body">
           <ChartView ref="chartRef" :channel-count="4" :max-points="4000" :channel-visible="channelVisible"
             @update:channel-visible="channelVisible = $event" />
         </div>
+        <ReplayBar v-if="replayActive" />
       </main>
 
       <!-- Right: Status Panel -->
@@ -361,7 +416,7 @@ handleSearch();
           </span>
         </div>
         <div class="panel-body">
-          <StatusPanel :status="status" :preview-sub-time="previewSubTime" />
+          <StatusPanel :status="status" :preview-sub-time="previewSubTime" :gps-override="replayGps" />
         </div>
       </aside>
     </div>
@@ -380,6 +435,7 @@ handleSearch();
       :sum-level="status?.sum_level"
       :min-level="status?.min_level"
     />
+
   </div>
 </template>
 
@@ -459,6 +515,29 @@ handleSearch();
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.replay-btn.active {
+  border-color: var(--accent);
+  color: var(--accent-dim);
+  background: var(--accent-glow, #eff4ff);
+}
+
+.replay-btn {
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+
+.replay-btn svg {
+  width: 13px;
+  height: 13px;
+  color: var(--text-tertiary);
+}
+
+.replay-btn:hover svg {
+  color: var(--accent-dim);
 }
 
 /* 连接状态胶囊 */
@@ -619,6 +698,10 @@ handleSearch();
 
 .panel-tag.live {
   color: var(--success);
+}
+
+.panel-tag.replay {
+  color: var(--accent-dim, #2563eb);
 }
 
 .tag-dot {

@@ -194,3 +194,37 @@ export enum ConnectionState {
     Connecting = "connecting",
     Connected = "connected",
 }
+
+/** 离线回放文件摘要（对应 Rust ReplayInfo） */
+export interface ReplayInfo {
+    /** 文件路径 */
+    path: string;
+    /** 文件字节数 */
+    file_size: number;
+    /** 可完整解析的帧数 */
+    frame_count: number;
+    /** GPS 周（取首帧） */
+    gps_week: number;
+    /** 首帧 GPS 周内秒 */
+    first_gps_second: number;
+    /** 末帧 GPS 周内秒 */
+    last_gps_second: number;
+}
+
+/** 回放帧的 GPS / 姿态信息，供设备状态面板显示 */
+export interface ReplayGps {
+    /** 当前帧号（0 基） */
+    frameIndex: number;
+    /** 总帧数 */
+    frameCount: number;
+    gpsWeek: number;
+    gpsSecond: number;
+    /** 细分时间（100ns 单位） */
+    subTime: number;
+    latitude: number;
+    longitude: number;
+    altitude: number;
+    azimuth: number;
+    pitch: number;
+    roll: number;
+}

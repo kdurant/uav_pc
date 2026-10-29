@@ -555,10 +555,12 @@ pub async fn send_command(
 }
 
 mod control;
+mod replay;
 mod sdcard;
 mod storage;
 
 pub use control::*;
+pub use replay::*;
 pub use sdcard::*;
 pub use storage::*;
 

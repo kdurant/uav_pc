@@ -96,9 +96,99 @@ fn read_f64_be(data: &[u8], pos: usize) -> Option<f64> {
     ]))
 }
 
+/// 帧长度探测失败原因
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FrameLenError {
+    /// 缓冲区数据不足，补读后可能成功
+    Incomplete,
+    /// 格式错误，无法继续按帧解析
+    Invalid(String),
+}
+
+/// 判断当前位置是否存在第二段的起始/长度描述符。
+///
+/// 第二段长度为 0 时设备可能整段省略描述符，此时该位置直接是下一个通道的
+/// magic（或整帧结束后的下一帧 magic），不能当作 s1/l1 读取，否则会把
+/// magic 字节误读成巨大的长度值。
+fn has_seg1_descriptor(data: &[u8], offset: usize) -> bool {
+    if offset + 4 > data.len() {
+        return false;
+    }
+    if read_u32_be(data, offset) == Some(CHANNEL_MAGIC) {
+        return false;
+    }
+    if offset + FRAME_MAGIC.len() <= data.len() && data[offset..offset + FRAME_MAGIC.len()] == FRAME_MAGIC
+    {
+        return false;
+    }
+    true
+}
+
 impl PreviewFrame {
+    /// 探测一帧占用的字节数（不复制波形数据），用于磁盘回放建索引
+    pub fn frame_len(data: &[u8]) -> Result<usize, FrameLenError> {
+        if data.len() < FRAME_MAGIC.len() {
+            return Err(FrameLenError::Incomplete);
+        }
+        if data[..FRAME_MAGIC.len()] != FRAME_MAGIC {
+            return Err(FrameLenError::Invalid("帧头 magic 不符".into()));
+        }
+        // 8 字节帧头 + 80 字节固定头
+        if data.len() < 88 {
+            return Err(FrameLenError::Incomplete);
+        }
+
+        let mut offset = 88;
+        for _ in 0..4 {
+            if offset + 4 > data.len() {
+                return Err(FrameLenError::Incomplete);
+            }
+            if read_u32_be(data, offset) != Some(CHANNEL_MAGIC) {
+                return Err(FrameLenError::Invalid(format!("偏移 {offset} 处缺少通道 magic")));
+            }
+            offset += 4;
+
+            // 通道号 + 第一段起始/长度
+            if offset + 6 > data.len() {
+                return Err(FrameLenError::Incomplete);
+            }
+            let seg0_len = read_u16_be(data, offset + 4).ok_or(FrameLenError::Incomplete)? as usize;
+            offset += 6;
+
+            let seg0_bytes = seg0_len * 2;
+            if offset + seg0_bytes > data.len() {
+                return Err(FrameLenError::Incomplete);
+            }
+            offset += seg0_bytes;
+
+            if has_seg1_descriptor(data, offset) {
+                if offset + 4 > data.len() {
+                    return Err(FrameLenError::Incomplete);
+                }
+                let seg1_len =
+                    read_u16_be(data, offset + 2).ok_or(FrameLenError::Incomplete)? as usize;
+                offset += 4;
+
+                let seg1_bytes = seg1_len * 2;
+                if offset + seg1_bytes > data.len() {
+                    return Err(FrameLenError::Incomplete);
+                }
+                offset += seg1_bytes;
+            }
+        }
+
+        Ok(offset)
+    }
+
     /// 从字节流解析预览数据帧
     pub fn parse(data: &[u8]) -> Result<Self, String> {
+        Self::parse_with_len(data).map(|(frame, _len)| frame)
+    }
+
+    /// 从字节流解析预览数据帧，同时返回实际消费的字节数。
+    ///
+    /// 磁盘回放需要用它推算帧长度，实时预览路径继续用 `parse`。
+    pub fn parse_with_len(data: &[u8]) -> Result<(Self, usize), String> {
         // 校验帧头 magic（8 字节）
         if data.len() < 8 || data[0..8] != FRAME_MAGIC {
             return Err("Invalid preview frame magic".into());
@@ -168,26 +258,30 @@ impl PreviewFrame {
                 break;
             }
 
-            // 第二段（可能不存在）
+            // 第二段：部分帧（第二段长度为 0 时）连描述符都不写，
+            // 表现为紧随其后的就是下一个通道 magic 或下一帧 magic，此时按无第二段处理。
             let seg1_start: u16;
             let seg1_len: u16;
             let mut seg1_data = Vec::new();
 
-            if offset + 4 <= data.len() {
+            if has_seg1_descriptor(data, offset) {
                 seg1_start = read_u16_be(data, offset).unwrap_or(0);
                 offset += 2;
                 seg1_len = read_u16_be(data, offset).unwrap_or(0);
                 offset += 2;
 
                 let seg1_byte_len = seg1_len as usize * 2;
-                if seg1_len > 0 && offset + seg1_byte_len <= data.len() {
+                if offset + seg1_byte_len <= data.len() {
                     for _ in 0..seg1_len {
                         seg1_data.push(read_u16_be(data, offset).unwrap_or(0));
                         offset += 2;
                     }
+                } else {
+                    break;
                 }
             } else {
-                break;
+                seg1_start = 0;
+                seg1_len = 0;
             }
 
             channels.push(ChannelData {
@@ -201,22 +295,25 @@ impl PreviewFrame {
             });
         }
 
-        Ok(Self {
-            gps_week,
-            gps_second,
-            sub_time,
-            azimuth,
-            pitch,
-            roll,
-            latitude,
-            longitude,
-            altitude,
-            encoder_bits,
-            encoder_value,
-            wave_channels,
-            wave_length,
-            channels,
-        })
+        Ok((
+            Self {
+                gps_week,
+                gps_second,
+                sub_time,
+                azimuth,
+                pitch,
+                roll,
+                latitude,
+                longitude,
+                altitude,
+                encoder_bits,
+                encoder_value,
+                wave_channels,
+                wave_length,
+                channels,
+            },
+            offset,
+        ))
     }
 
     /// 编码为紧凑二进制（小端），供 Tauri IPC Channel 推送。

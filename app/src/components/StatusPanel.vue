@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { SystemStatus, TemperatureConfig, TemperaturePoint } from "../types";
+import type { ReplayGps, SystemStatus, TemperatureConfig, TemperaturePoint } from "../types";
 import TemperatureHistoryDialog from "./TemperatureHistoryDialog.vue";
 import AttitudeView from "./AttitudeView.vue";
 import { useToast } from "../composables/useToast";
@@ -11,6 +11,8 @@ const props = defineProps<{
   status: SystemStatus | null;
   /** 预览帧中的细分时间（100ns 单位） */
   previewSubTime?: number | null;
+  /** 离线回放当前帧的 GPS 信息；有值时覆盖设备实时 GPS 显示 */
+  gpsOverride?: ReplayGps | null;
 }>();
 
 const toast = useToast();
@@ -18,6 +20,44 @@ const { open: openTriggerHelp } = useTriggerHelp();
 
 /** 方便模板安全访问 */
 const s = computed(() => props.status);
+
+/** GPS 区域数据来源：回放优先，否则用设备实时状态 */
+const gpsView = computed(() => {
+  const o = props.gpsOverride;
+  if (o) {
+    return {
+      replay: true,
+      week: o.gpsWeek,
+      second: o.gpsSecond,
+      subTime: o.subTime,
+      latitude: o.latitude,
+      longitude: o.longitude,
+      altitude: o.altitude,
+      azimuth: o.azimuth,
+      pitch: o.pitch,
+      roll: o.roll,
+    };
+  }
+  return {
+    replay: false,
+    week: props.status?.gps_week,
+    second: props.status?.gps_second,
+    subTime: props.previewSubTime ?? null,
+    latitude: props.status?.gps_latitude,
+    longitude: props.status?.gps_longitude,
+    altitude: props.status?.gps_altitude,
+    azimuth: props.status?.gps_azimuth,
+    pitch: props.status?.gps_pitch,
+    roll: props.status?.gps_roll,
+  };
+});
+
+/** 回放标记文本：回放 1,234/170,999 */
+const replayTag = computed(() => {
+  const o = props.gpsOverride;
+  if (!o) return "";
+  return `回放 ${(o.frameIndex + 1).toLocaleString("zh-CN")}/${o.frameCount.toLocaleString("zh-CN")}`;
+});
 
 // ===== 板载温度历史（每 10s 一点，文件持久化） =====
 const tempHistory = ref<TemperaturePoint[]>([]);
@@ -88,6 +128,12 @@ function formatDiskSize(sectors: number | undefined): string {
 function fmtFixed(v: number | undefined, digits: number): string {
   if (v === undefined || v === null) return "-";
   return v.toFixed(digits);
+}
+
+/** GPS 周内秒：保留 4 位小数并带单位 */
+function fmtSeconds(v: number | undefined | null): string {
+  if (v === undefined || v === null) return "-";
+  return `${v.toFixed(4)} s`;
 }
 
 /** SATA 连接状态文本 */
@@ -408,39 +454,46 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 
     <!-- GPS -->
     <section class="status-group">
-      <h4>GPS 数据</h4>
+      <h4>
+        GPS 数据
+        <span v-if="gpsView.replay" class="replay-tag">{{ replayTag }}</span>
+      </h4>
       <div class="row-list">
         <div class="status-row">
           <span class="label">GPS 周</span>
-          <span class="value mono">{{ s?.gps_week ?? "-" }}</span>
+          <span class="value mono">{{ gpsView.week ?? "-" }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">GPS 秒</span>
+          <span class="value mono">{{ fmtSeconds(gpsView.second) }}</span>
         </div>
         <div class="status-row">
           <span class="label">细分时间</span>
           <span
             class="value mono"
-            :title="previewSubTime != null ? `原始值 ${previewSubTime}（100 ns 单位）` : ''"
+            :title="gpsView.subTime != null ? `原始值 ${gpsView.subTime}（100 ns 单位）` : ''"
           >
-            {{ formatSubTime(previewSubTime) }}
+            {{ formatSubTime(gpsView.subTime) }}
           </span>
         </div>
         <div class="status-row">
           <span class="label">经度</span>
-          <span class="value mono">{{ fmtFixed(s?.gps_longitude, 6) }}°</span>
+          <span class="value mono">{{ fmtFixed(gpsView.longitude, 6) }}°</span>
         </div>
         <div class="status-row">
           <span class="label">纬度</span>
-          <span class="value mono">{{ fmtFixed(s?.gps_latitude, 6) }}°</span>
+          <span class="value mono">{{ fmtFixed(gpsView.latitude, 6) }}°</span>
         </div>
         <div class="status-row">
           <span class="label">高度</span>
-          <span class="value mono">{{ fmtFixed(s?.gps_altitude, 2) }} m</span>
+          <span class="value mono">{{ fmtFixed(gpsView.altitude, 2) }} m</span>
         </div>
       </div>
       <AttitudeView
         class="gps-attitude"
-        :azimuth="s?.gps_azimuth ?? null"
-        :pitch="s?.gps_pitch ?? null"
-        :roll="s?.gps_roll ?? null"
+        :azimuth="gpsView.azimuth ?? null"
+        :pitch="gpsView.pitch ?? null"
+        :roll="gpsView.roll ?? null"
       />
     </section>
 
@@ -498,6 +551,25 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
   flex: 1;
   height: 1px;
   background: var(--border-color);
+}
+
+/* 回放数据来源标记 */
+.replay-tag {
+  order: 1;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--accent-glow, #e8efff);
+  color: var(--accent-dim, #2563eb);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.status-group h4::after {
+  order: 2;
 }
 
 .row-list {
