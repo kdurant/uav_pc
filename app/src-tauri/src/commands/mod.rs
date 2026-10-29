@@ -554,11 +554,13 @@ pub async fn send_command(
     Ok(())
 }
 
+mod cloud;
 mod control;
 mod replay;
 mod sdcard;
 mod storage;
 
+pub use cloud::*;
 pub use control::*;
 pub use replay::*;
 pub use sdcard::*;

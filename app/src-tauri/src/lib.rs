@@ -11,6 +11,7 @@ mod device_sftp;
 mod laser;
 mod motor;
 mod network;
+mod pointcloud;
 mod preview;
 mod protocol;
 mod replay;
@@ -189,6 +190,7 @@ pub fn run() {
             commands::open_replay_file,
             commands::read_replay_frame,
             commands::close_replay_file,
+            commands::build_point_cloud,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

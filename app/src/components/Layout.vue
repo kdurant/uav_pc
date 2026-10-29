@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from "vue";
+import { ref, computed, watch, onUnmounted, defineAsyncComponent } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useDeviceDiscovery } from "../composables/useDeviceDiscovery";
 import { useSystemStatus } from "../composables/useSystemStatus";
@@ -11,7 +11,12 @@ import ChartView from "./ChartView.vue";
 import ControlPanel from "./ControlPanel.vue";
 import TriggerModeDialog from "./TriggerModeDialog.vue";
 import ReplayBar from "./ReplayBar.vue";
+import CloudBar from "./CloudBar.vue";
+
+// three.js 体积较大，点云视图按需加载，避免拖慢首屏
+const PointCloudView = defineAsyncComponent(() => import("./PointCloudView.vue"));
 import { useReplay } from "../composables/useReplay";
+import { usePointCloud } from "../composables/usePointCloud";
 import { ConnectionState } from "../types";
 import type { PreviewFrame } from "../types";
 
@@ -31,6 +36,37 @@ const {
   exit: exitReplay,
   setSink: setReplaySink,
 } = useReplay();
+
+// 点云 / DEM 模式（与实时预览、离线回放互斥）
+const {
+  active: cloudActive,
+  data: cloudData,
+  display: cloudDisplay,
+  zScale: cloudZScale,
+  enter: enterCloud,
+  exit: exitCloud,
+} = usePointCloud();
+
+/** 任何离线模式（回放 / 点云）都会暂停实时预览 */
+const offlineMode = computed(() => replayActive.value || cloudActive.value);
+
+function toggleReplay() {
+  if (replayActive.value) {
+    exitReplay();
+    return;
+  }
+  if (cloudActive.value) exitCloud();
+  enterReplay();
+}
+
+function toggleCloud() {
+  if (cloudActive.value) {
+    exitCloud();
+    return;
+  }
+  if (replayActive.value) exitReplay();
+  enterCloud();
+}
 
 const connectionState = ref<ConnectionState>(ConnectionState.Disconnected);
 const showDeviceSelector = ref(false);
@@ -55,8 +91,8 @@ function clearPreviewSubTime() {
 
 // Preview data → ChartView（整帧、按绝对采样位置对齐）+ 细分时间
 function pushPreviewFrame(series: number[][], frame: PreviewFrame) {
-  // 回放模式与实时预览互斥，实时帧不上屏，避免两路数据互相覆盖
-  if (replayActive.value) return;
+  // 回放 / 点云模式与实时预览互斥，实时帧不上屏，避免两路数据互相覆盖
+  if (offlineMode.value) return;
 
   chartRef.value?.setFrame(series);
 
@@ -76,8 +112,8 @@ setReplaySink((series) => {
   else chartRef.value?.clear();
 });
 
-// 回放与实时预览互斥：进入回放时停掉实时帧通道，退出时按连接状态恢复
-watch(replayActive, (on) => {
+// 离线模式与实时预览互斥：进入离线模式时停掉实时帧通道，退出时按连接状态恢复
+watch(offlineMode, (on) => {
   if (on) {
     previewOutput.stop();
     clearPreviewSubTime();
@@ -336,10 +372,10 @@ handleSearch();
 
       <div class="toolbar-right">
         <button
-          class="replay-btn"
+          class="tool-btn"
           :class="{ active: replayActive }"
           :title="replayActive ? '退出离线回放，恢复实时预览' : '按帧回放本地采集数据文件'"
-          @click="replayActive ? exitReplay() : enterReplay()"
+          @click="toggleReplay"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
@@ -347,6 +383,20 @@ handleSearch();
             <path d="M14 5h2v14h-2z" />
           </svg>
           {{ replayActive ? "退出回放" : "离线回放" }}
+        </button>
+        <button
+          class="tool-btn"
+          :class="{ active: cloudActive }"
+          :title="cloudActive ? '退出点云模式' : '把采集数据生成水下地形点云 / DEM'"
+          @click="toggleCloud"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" />
+            <path d="M4 7.5l8 4.5 8-4.5" />
+            <path d="M12 12v9" />
+          </svg>
+          {{ cloudActive ? "退出点云" : "点云" }}
         </button>
         <div class="conn-pill" :class="connectionClass">
           <span class="conn-dot"></span>
@@ -396,15 +446,34 @@ handleSearch();
       <main class="panel panel-center">
         <div class="panel-header">
           <span class="panel-title">数据预览</span>
-          <span class="panel-tag" :class="{ replay: replayActive, live: !replayActive && connectionState === ConnectionState.Connected }">
-            {{ replayActive ? `离线回放 · ${replayInfo ? replayInfo.frame_count.toLocaleString("zh-CN") + " 帧" : "未选择文件"}` : "实时波形 · 4 CH" }}
+          <span class="panel-tag" :class="{ replay: replayActive || cloudActive, live: !offlineMode && connectionState === ConnectionState.Connected }">
+            {{
+              cloudActive
+                ? `点云地形 · ${cloudData ? cloudData.pointCount.toLocaleString("zh-CN") + " 点" : "未生成"}`
+                : replayActive
+                  ? `离线回放 · ${replayInfo ? replayInfo.frame_count.toLocaleString("zh-CN") + " 帧" : "未选择文件"}`
+                  : "实时波形 · 4 CH"
+            }}
           </span>
         </div>
         <div class="panel-body chart-body">
-          <ChartView ref="chartRef" :channel-count="4" :max-points="4000" :channel-visible="channelVisible"
-            @update:channel-visible="channelVisible = $event" />
+          <PointCloudView
+            v-if="cloudActive"
+            :data="cloudData"
+            :display="cloudDisplay"
+            :z-scale="cloudZScale"
+          />
+          <ChartView
+            v-else
+            ref="chartRef"
+            :channel-count="4"
+            :max-points="4000"
+            :channel-visible="channelVisible"
+            @update:channel-visible="channelVisible = $event"
+          />
         </div>
         <ReplayBar v-if="replayActive" />
+        <CloudBar v-if="cloudActive" />
       </main>
 
       <!-- Right: Status Panel -->
@@ -517,26 +586,26 @@ handleSearch();
   gap: 10px;
 }
 
-.replay-btn.active {
+.tool-btn.active {
   border-color: var(--accent);
   color: var(--accent-dim);
   background: var(--accent-glow, #eff4ff);
 }
 
-.replay-btn {
+.tool-btn {
   gap: 6px;
   height: 30px;
   padding: 0 12px;
   font-size: 12.5px;
 }
 
-.replay-btn svg {
+.tool-btn svg {
   width: 13px;
   height: 13px;
   color: var(--text-tertiary);
 }
 
-.replay-btn:hover svg {
+.tool-btn:hover svg {
   color: var(--accent-dim);
 }
 
