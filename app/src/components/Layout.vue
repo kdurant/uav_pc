@@ -373,8 +373,7 @@ handleSearch();
           </svg>
         </div>
         <div class="brand-text">
-          <span class="app-title">无人机采集卡上位机</span>
-          <span class="app-subtitle radar-name">{{ radarDisplayName }}</span>
+          <span class="app-title">{{ radarDisplayName }}上位机</span>
         </div>
       </div>
 
@@ -578,24 +577,6 @@ handleSearch();
   letter-spacing: 0.012em;
   white-space: nowrap;
   line-height: 1.25;
-}
-
-.app-subtitle {
-  font-size: 9.5px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  letter-spacing: 0.16em;
-  white-space: nowrap;
-}
-
-.app-subtitle.radar-name {
-  display: block;
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  color: var(--text-secondary);
 }
 
 .toolbar-right {
@@ -850,10 +831,6 @@ handleSearch();
 
   .panel-center {
     min-width: 300px;
-  }
-
-  .app-subtitle {
-    display: none;
   }
 
   .panel-header {
