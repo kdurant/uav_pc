@@ -51,8 +51,16 @@ local_port = 12345
 remote_port = 6666
 broadcast_search = true
 device_ip = ""
+
+[radar]
+display_name = "5K 雷达"
+laser_type = "laser_connet"
+laser_info = ""
 ```
 
+- `display_name`：上位机顶部显示的雷达名称
+- `laser_type`：激光器通信协议，当前支持 `laser_connet` / `laser_5kHz`
+- `laser_info`：自定义激光器信息（预留字段，当前不在界面显示）
 - `local_ip`：本机 IP 地址，用于 UDP 绑定和设备发现
 - `local_port`：UDP 端口号
 - `remote_port`：设备端 UDP 端口号

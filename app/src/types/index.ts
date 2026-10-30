@@ -94,6 +94,16 @@ export interface PreviewFrame {
     channels: ChannelData[];
 }
 
+/** 雷达/激光器配置（对应 Rust RadarConfig） */
+export interface RadarConfig {
+    /** 上位机显示名称 */
+    display_name: string;
+    /** 激光器类型，用于选择通信协议 */
+    laser_type: string;
+    /** 自定义激光器信息（预留字段，当前不在界面显示） */
+    laser_info: string;
+}
+
 /** 应用配置 */
 export interface AppConfig {
     basic: {
@@ -119,6 +129,19 @@ export interface LaserStatus {
     pump2_current: number;
     /** 输出功率（mW） */
     export_power: number;
+
+    // ===== 5kHz 激光器扩展字段 =====
+    laser_number?: number | null;
+    freq_detected_hz?: number | null;
+    freq_set_hz?: number | null;
+    pulse_width_us?: number | null;
+    ld_current_ma?: number | null;
+    temp1_c?: number | null;
+    temp2_c?: number | null;
+    q_delay_us?: number | null;
+    work_time_s?: number | null;
+    status_flags?: number | null;
+    error_flags?: number | null;
 }
 
 /** 电机实时状态（对应 Rust MotorState） */export interface MotorState {
