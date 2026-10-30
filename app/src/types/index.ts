@@ -209,6 +209,8 @@ export interface ReplayInfo {
     first_gps_second: number;
     /** 末帧 GPS 周内秒 */
     last_gps_second: number;
+    /** 文件末尾未能解析的字节数（损坏或未写完），0 表示完整 */
+    skipped_bytes: number;
 }
 
 /** 回放帧的 GPS / 姿态信息，供设备状态面板显示 */

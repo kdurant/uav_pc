@@ -58,6 +58,9 @@ const CHANNEL_MAGIC: u32 = 0xEB_90_A5_5A;
 /// 二进制 IPC 帧头 magic：'PRV1'
 const BINARY_MAGIC: u32 = 0x5052_5631;
 
+/// 帧头 magic 长度
+pub const FRAME_MAGIC_LEN: usize = 8;
+
 /// 帧头 magic（8 字节）
 const FRAME_MAGIC: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
 
@@ -125,6 +128,11 @@ fn has_seg1_descriptor(data: &[u8], offset: usize) -> bool {
 }
 
 impl PreviewFrame {
+    /// 判断 data 是否以完整帧头 magic 开头（用于磁盘回放重同步/帧边界校验）
+    pub fn is_frame_start(data: &[u8]) -> bool {
+        data.len() >= FRAME_MAGIC.len() && data[..FRAME_MAGIC.len()] == FRAME_MAGIC
+    }
+
     /// 探测一帧占用的字节数（不复制波形数据），用于磁盘回放建索引
     pub fn frame_len(data: &[u8]) -> Result<usize, FrameLenError> {
         if data.len() < FRAME_MAGIC.len() {

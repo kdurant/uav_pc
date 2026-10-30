@@ -9,7 +9,7 @@
 //! 顺序解析一遍建立「偏移 + 长度」索引（约 1.4MB），之后按索引随机读取单帧，
 //! 不会把整个文件读进内存。
 
-use crate::preview::{FrameLenError, PreviewFrame};
+use crate::preview::{FrameLenError, PreviewFrame, FRAME_MAGIC_LEN};
 use serde::Serialize;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -33,6 +33,8 @@ pub struct ReplayInfo {
     pub first_gps_second: f64,
     /// 末帧 GPS 周内秒
     pub last_gps_second: f64,
+    /// 文件末尾未能解析的字节数（损坏或未写完），0 表示完整
+    pub skipped_bytes: u64,
 }
 
 /// 单帧位置信息
@@ -73,7 +75,7 @@ impl ReplaySession {
         }
 
         let started = std::time::Instant::now();
-        let frames = Self::build_index(&mut file, file_size)?;
+        let (frames, skipped_bytes) = Self::build_index(&mut file, file_size)?;
         if frames.is_empty() {
             return Err("文件中未找到有效采集帧".into());
         }
@@ -82,6 +84,12 @@ impl ReplaySession {
             frames.len(),
             started.elapsed()
         );
+        if skipped_bytes > 0 {
+            log::warn!(
+                "回放文件末尾 {} 字节无法解析（数据损坏或未写完），已忽略",
+                skipped_bytes
+            );
+        }
 
         // 首末帧 GPS 时间用于界面展示
         let first = Self::parse_entry(&mut file, frames[0])?;
@@ -94,6 +102,7 @@ impl ReplaySession {
             gps_week: first.gps_week,
             first_gps_second: first.gps_second,
             last_gps_second: last.gps_second,
+            skipped_bytes,
         };
 
         log::info!(
@@ -106,48 +115,110 @@ impl ReplaySession {
         Ok(Self { file, frames, info })
     }
 
-    /// 顺序解析整个文件，记录每帧的偏移与长度
-    fn build_index(file: &mut File, file_size: u64) -> Result<Vec<FrameEntry>, String> {
+    /// 顺序解析整个文件，记录每帧的偏移与长度。
+    ///
+    /// 返回帧索引和文件末尾未能解析的字节数。遇到损坏或未写完的数据时不再
+    /// 整体报错，而是保留已解析的帧并截断索引，保证文件仍可打开回放。
+    fn build_index(file: &mut File, file_size: u64) -> Result<(Vec<FrameEntry>, u64), String> {
         file.seek(SeekFrom::Start(0))
             .map_err(|e| format!("定位失败: {e}"))?;
 
         let mut buf: Vec<u8> = Vec::with_capacity(INDEX_CHUNK * 2);
         let mut base: u64 = 0; // buf[0] 对应的文件偏移
-        let mut pos: usize = 0; // 当前帧在 buf 中的起点
+        let mut cursor: u64 = 0; // 当前帧的绝对偏移
         let mut frames: Vec<FrameEntry> = Vec::new();
+        let mut skipped: u64 = 0;
 
         loop {
-            if base + pos as u64 >= file_size {
+            if cursor >= file_size {
                 break;
             }
-            if buf.len() == pos {
-                if !read_more(file, &mut buf, &mut base, &mut pos)? {
+
+            if cursor >= base + buf.len() as u64 {
+                if !read_more_at(file, &mut buf, &mut base, cursor)? {
+                    skipped = file_size - cursor;
                     break;
                 }
                 continue;
             }
 
-            match PreviewFrame::frame_len(&buf[pos..]) {
+            let rel = (cursor - base) as usize;
+            match PreviewFrame::frame_len(&buf[rel..]) {
                 Ok(len) => {
+                    let next = cursor + len as u64;
+                    if next > file_size {
+                        skipped = file_size - cursor;
+                        break;
+                    }
+
+                    // 帧边界校验：下一帧必须以 magic 开头（或正好到文件尾）。
+                    // frame_len 对第二段描述符的判定是启发式的，损坏数据可能让
+                    // 长度偏大，这里做兜底，避免把后续字节误当成帧内容。
+                    if !Self::is_boundary(file, &mut buf, &mut base, cursor, next, file_size)? {
+                        log::warn!(
+                            "回放文件在偏移 {cursor} 处帧边界异常，忽略后续 {} 字节",
+                            file_size - cursor
+                        );
+                        skipped = file_size - cursor;
+                        break;
+                    }
+
                     frames.push(FrameEntry {
-                        offset: base + pos as u64,
+                        offset: cursor,
                         len: len as u32,
                     });
-                    pos += len;
+                    cursor = next;
                 }
                 Err(FrameLenError::Incomplete) => {
                     // 缓冲区不足：补读；补不到说明是文件末尾残帧
-                    if !read_more(file, &mut buf, &mut base, &mut pos)? {
+                    if !read_more_at(file, &mut buf, &mut base, cursor)? {
+                        skipped = file_size - cursor;
                         break;
                     }
                 }
                 Err(FrameLenError::Invalid(msg)) => {
-                    return Err(format!("第 {} 帧解析失败: {msg}", frames.len()));
+                    if frames.is_empty() {
+                        return Err(format!("第 0 帧解析失败: {msg}"));
+                    }
+                    log::warn!(
+                        "回放文件在偏移 {cursor} 处无法解析（{msg}），忽略后续 {} 字节",
+                        file_size - cursor
+                    );
+                    skipped = file_size - cursor;
+                    break;
                 }
             }
         }
 
-        Ok(frames)
+        Ok((frames, skipped))
+    }
+
+    /// 校验 `next` 处是否仍是帧头；缓冲区不足时按需补读。
+    fn is_boundary(
+        file: &mut File,
+        buf: &mut Vec<u8>,
+        base: &mut u64,
+        cursor: u64,
+        next: u64,
+        file_size: u64,
+    ) -> Result<bool, String> {
+        if next >= file_size {
+            return Ok(true);
+        }
+        // 尾部不足一个帧头的残留字节，视为可接受的文件末尾
+        if file_size - next < FRAME_MAGIC_LEN as u64 {
+            return Ok(true);
+        }
+
+        let need = next + FRAME_MAGIC_LEN as u64;
+        while *base + (buf.len() as u64) < need {
+            if !read_more_at(file, buf, base, cursor)? {
+                return Ok(false);
+            }
+        }
+
+        let rel = (next - *base) as usize;
+        Ok(PreviewFrame::is_frame_start(&buf[rel..]))
     }
 
     fn parse_entry(file: &mut File, entry: FrameEntry) -> Result<PreviewFrame, String> {
@@ -170,17 +241,17 @@ impl ReplaySession {
     }
 }
 
-/// 丢弃已消费数据并追加一块新数据；返回是否还有数据可读
-fn read_more(
+/// 丢弃 `cursor` 之前已消费的数据并追加一块新数据；返回是否还有数据可读
+fn read_more_at(
     file: &mut File,
     buf: &mut Vec<u8>,
     base: &mut u64,
-    pos: &mut usize,
+    cursor: u64,
 ) -> Result<bool, String> {
-    if *pos > 0 {
-        buf.drain(..*pos);
-        *base += *pos as u64;
-        *pos = 0;
+    if cursor > *base {
+        let drop = ((cursor - *base) as usize).min(buf.len());
+        buf.drain(..drop);
+        *base += drop as u64;
     }
     let mut chunk = vec![0u8; INDEX_CHUNK];
     let n = file.read(&mut chunk).map_err(|e| format!("读取失败: {e}"))?;
