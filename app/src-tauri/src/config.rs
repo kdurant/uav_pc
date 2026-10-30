@@ -18,6 +18,38 @@ fn default_broadcast_search() -> bool {
     true
 }
 
+/// 雷达/激光器配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RadarConfig {
+    /// 上位机显示名称，例如 "5K 雷达"
+    #[serde(default = "default_radar_display_name")]
+    pub display_name: String,
+    /// 激光器类型，用于选择通信协议；当前支持 laser_connet
+    #[serde(default = "default_laser_type")]
+    pub laser_type: String,
+    /// 自定义激光器信息，仅用于界面展示
+    #[serde(default)]
+    pub laser_info: String,
+}
+
+fn default_radar_display_name() -> String {
+    "雷达".to_string()
+}
+
+fn default_laser_type() -> String {
+    "laser_connet".to_string()
+}
+
+impl Default for RadarConfig {
+    fn default() -> Self {
+        Self {
+            display_name: default_radar_display_name(),
+            laser_type: default_laser_type(),
+            laser_info: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptureConfig {
     pub preview_coe: u32,
@@ -91,6 +123,9 @@ impl Default for TemperatureConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub basic: BasicConfig,
+    /// 雷达名称/激光器信息；老配置文件缺省时使用默认值
+    #[serde(default)]
+    pub radar: RadarConfig,
     pub capture: CaptureConfig,
     /// GPS 配置；老配置文件缺省时使用默认值
     #[serde(default)]
@@ -137,6 +172,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             basic: BasicConfig::default(),
+            radar: RadarConfig::default(),
             capture: CaptureConfig::default(),
             gps: GpsConfig::default(),
             ssd: SsdConfig::default(),
@@ -218,6 +254,21 @@ pin_threshold = 1000
         assert_eq!(config.temperature.save_points, 180);
         assert_eq!(config.temperature.display_points, 180);
         assert_eq!(config.ssd.chunk_mb, 1);
+        assert_eq!(config.radar.display_name, "雷达");
+        assert_eq!(config.radar.laser_type, "laser_connet");
+        assert_eq!(config.radar.laser_info, "");
+    }
+
+    #[test]
+    fn test_radar_config() {
+        let toml = format!(
+            "[basic]\nlocal_ip = \"192.168.1.111\"\nlocal_port = 12345\nremote_port = 6666\n[radar]\ndisplay_name = \"5K 雷达\"\nlaser_type = \"laser_connet\"\nlaser_info = \"Laser A / 20kHz\"\n{}",
+            CAPTURE
+        );
+        let config: AppConfig = toml::from_str(&toml).unwrap();
+        assert_eq!(config.radar.display_name, "5K 雷达");
+        assert_eq!(config.radar.laser_type, "laser_connet");
+        assert_eq!(config.radar.laser_info, "Laser A / 20kHz");
     }
 
     #[test]

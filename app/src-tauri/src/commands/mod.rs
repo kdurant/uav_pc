@@ -186,6 +186,12 @@ pub fn get_temperature_config(app: AppHandle) -> crate::config::TemperatureConfi
     app.state::<AppConfig>().temperature.clone()
 }
 
+/// 读取雷达显示名称、激光器类型和自定义信息
+#[tauri::command]
+pub fn get_radar_config(app: AppHandle) -> crate::config::RadarConfig {
+    app.state::<AppConfig>().radar.clone()
+}
+
 /// 发现局域网内设备：发送 0x0100 广播，300ms 内收集响应设备；
 /// `[basic].broadcast_search = false` 时不广播，直接返回 `device_ip`
 #[tauri::command]

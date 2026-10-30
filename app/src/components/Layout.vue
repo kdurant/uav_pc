@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted, defineAsyncComponent } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useDeviceDiscovery } from "../composables/useDeviceDiscovery";
 import { useSystemStatus } from "../composables/useSystemStatus";
 import { usePreviewData } from "../composables/usePreviewData";
 import { useToast } from "../composables/useToast";
+import { useRadarConfig } from "../composables/useRadarConfig";
 import DeviceSelector from "./DeviceSelector.vue";
 import StatusPanel from "./StatusPanel.vue";
 import ChartView from "./ChartView.vue";
@@ -22,6 +23,13 @@ import type { PreviewFrame } from "../types";
 
 const { devices, isSearching, selectedDevice, searchDevices, selectDevice, clearSelection } =
   useDeviceDiscovery();
+
+const {
+  displayName: radarDisplayName,
+  load: loadRadarConfig,
+} = useRadarConfig();
+
+onMounted(loadRadarConfig);
 
 const { status, stale: statusStale, start: startStatus, stop: stopStatus } = useSystemStatus();
 
@@ -366,7 +374,7 @@ handleSearch();
         </div>
         <div class="brand-text">
           <span class="app-title">无人机采集卡上位机</span>
-          <span class="app-subtitle">UAV DATA ACQUISITION</span>
+          <span class="app-subtitle radar-name">{{ radarDisplayName }}</span>
         </div>
       </div>
 
@@ -578,6 +586,16 @@ handleSearch();
   color: var(--text-tertiary);
   letter-spacing: 0.16em;
   white-space: nowrap;
+}
+
+.app-subtitle.radar-name {
+  display: block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
 }
 
 .toolbar-right {

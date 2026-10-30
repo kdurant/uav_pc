@@ -9,6 +9,7 @@ mod commands;
 mod config;
 mod device_sftp;
 mod laser;
+mod laser_5khz;
 mod motor;
 mod network;
 mod pointcloud;
@@ -176,6 +177,7 @@ pub fn run() {
             commands::load_temperature_history,
             commands::save_temperature_history,
             commands::get_temperature_config,
+            commands::get_radar_config,
             commands::start_preview,
             commands::register_preview_channel,
             commands::unregister_preview_channel,

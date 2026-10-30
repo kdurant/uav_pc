@@ -15,6 +15,15 @@ use serde::Serialize;
 /// 等待激光器应答的超时时间
 pub const LASER_RESPONSE_TIMEOUT_MS: u64 = 1000;
 
+/// 当前上位机支持的激光器类型。
+/// `laserConnet` 是设备端 auto_start 的旧写法，保留兼容。
+pub fn is_supported_type(laser_type: &str) -> bool {
+    matches!(
+        laser_type,
+        "laser_connet" | "laserConnet" | "laser_5kHz"
+    )
+}
+
 /// 激光器工作模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenMode {
@@ -40,6 +49,30 @@ pub struct LaserStatus {
     pub pump2_current: u16,
     /// 输出功率（mW）
     pub export_power: u32,
+
+    // ===== 5kHz 激光器扩展字段（laser_5kHz） =====
+    /// 激光器编号
+    pub laser_number: Option<u8>,
+    /// 检测到的触发频率（Hz）
+    pub freq_detected_hz: Option<u32>,
+    /// 设定的触发频率（Hz）
+    pub freq_set_hz: Option<u32>,
+    /// 振荡级脉宽（µs）
+    pub pulse_width_us: Option<u16>,
+    /// LD 实际预置电流（mA）
+    pub ld_current_ma: Option<u16>,
+    /// 温度检测 1（℃）
+    pub temp1_c: Option<i8>,
+    /// 温度检测 2（℃）
+    pub temp2_c: Option<i8>,
+    /// 调 Q 延时（µs）
+    pub q_delay_us: Option<u16>,
+    /// 出光/工作时间（s）
+    pub work_time_s: Option<u32>,
+    /// 原始状态标志位
+    pub status_flags: Option<u32>,
+    /// 原始错误标志位
+    pub error_flags: Option<u32>,
 }
 
 /// 打开激光器
@@ -139,12 +172,22 @@ pub fn parse_status(payload: &[u8]) -> Result<LaserStatus, String> {
         pump1_current: u16::from_le_bytes([d[8], d[9]]),
         pump2_current: u16::from_le_bytes([d[10], d[11]]),
         export_power: u16::from_le_bytes([d[12], d[13]]) as u32 * 10,
+        ..Default::default()
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_supported_laser_types() {
+        assert!(is_supported_type("laser_connet"));
+        assert!(is_supported_type("laserConnet"));
+        assert!(is_supported_type("laser_5kHz"));
+        assert!(!is_supported_type(""));
+        assert!(!is_supported_type("china"));
+    }
 
     #[test]
     fn test_open_close_frame() {

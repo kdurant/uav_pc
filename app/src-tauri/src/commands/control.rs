@@ -1,6 +1,7 @@
 //! 激光器（0x0200）与电机（0x0f00）透传控制。
 
 use super::*;
+use crate::laser_5khz;
 
 // ========== 激光器 / 电机（0x0200 / 0x0f00 透传） ==========
 
@@ -19,6 +20,19 @@ pub async fn laser_command(
     action: String,
     value: Option<u32>,
 ) -> Result<Option<LaserStatus>, String> {
+    // 根据 config.toml [radar].laser_type 选择激光器通信协议。
+    // 目前只有 laser_connet；未知类型直接拒绝，避免用错协议操作激光器。
+    let laser_type = app.state::<AppConfig>().radar.laser_type.trim().to_string();
+    if laser_type.is_empty() {
+        return Err("未配置激光器类型（config.toml [radar].laser_type）".into());
+    }
+    if laser_type == "laser_5kHz" {
+        return laser_5khz_command(app, device_ip, action, value).await;
+    }
+    if !laser::is_supported_type(&laser_type) {
+        return Err(format!("暂不支持激光器类型: {}", laser_type));
+    }
+
     let _op = acquire_op_lock(&app).await;
     let target = device_target(&app, &device_ip).await?;
     let network = get_or_init_network(&app).await?;
@@ -114,6 +128,91 @@ pub async fn laser_command(
             Ok(Some(status))
         }
         other => Err(format!("未知的激光器操作: {}", other)),
+    }
+}
+
+/// 5kHz / 25uJ 激光器主控板控制。
+///
+/// 命令帧和状态帧格式见 doc/laser/5khz/。
+async fn laser_5khz_command(
+    app: AppHandle,
+    device_ip: String,
+    action: String,
+    value: Option<u32>,
+) -> Result<Option<LaserStatus>, String> {
+    let _op = acquire_op_lock(&app).await;
+    let target = device_target(&app, &device_ip).await?;
+    let network = get_or_init_network(&app).await?;
+
+    let (frame, require_status) = match action.as_str() {
+        "open" => (laser_5khz::build_open(), false),
+        "close" => (laser_5khz::build_close(), false),
+        "mode" => {
+            let mode = value.ok_or("缺少激光器模式")?;
+            if mode > 1 {
+                return Err("激光器模式取值必须为 0（内触发）或 1（外触发）".into());
+            }
+            let mode = if mode == 0 {
+                laser::OpenMode::InSide
+            } else {
+                laser::OpenMode::OutSide
+            };
+            (laser_5khz::build_mode(mode), false)
+        }
+        "freq" => {
+            let hz = value.ok_or("缺少重频值（Hz）")?;
+            if !(1..=5000).contains(&hz) {
+                return Err("5kHz 激光器重频范围为 1~5000 Hz".into());
+            }
+            (laser_5khz::build_freq(hz), false)
+        }
+        "current" => {
+            let ma = value.ok_or("缺少电流值（mA）")?;
+            if ma > 6000 {
+                return Err("5kHz 激光器电流范围为 0~6000 mA".into());
+            }
+            (laser_5khz::build_current_ma(ma), false)
+        }
+        "pulse_width" => {
+            let us = value.ok_or("缺少脉宽值（µs）")?;
+            if !(50..=80).contains(&us) {
+                return Err("5kHz 激光器脉宽范围为 50~80 µs".into());
+            }
+            (laser_5khz::build_pulse_width(us as u16), false)
+        }
+        "clear_error" => (laser_5khz::build_clear_error(), false),
+        "status" => (laser_5khz::build_query_status(), true),
+        other => return Err(format!("未知的激光器操作: {}", other)),
+    };
+
+    let resp = request(
+        &app,
+        &network,
+        target,
+        0x0200,
+        frame,
+        laser::LASER_RESPONSE_TIMEOUT_MS,
+    )
+    .await?;
+
+    match laser_5khz::parse_status(&resp) {
+        Ok(status) => Ok(Some(status)),
+        Err(e) => {
+            if require_status {
+                Err(format!(
+                    "5kHz 激光器状态解析失败: {}（应答: {}）",
+                    e,
+                    hex_bytes(&resp)
+                ))
+            } else {
+                log::debug!(
+                    "5kHz laser command {} ok, response: {}",
+                    action,
+                    hex_bytes(&resp)
+                );
+                Ok(None)
+            }
+        }
     }
 }
 
