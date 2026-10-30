@@ -185,35 +185,153 @@ async fn laser_5khz_command(
         other => return Err(format!("未知的激光器操作: {}", other)),
     };
 
-    let resp = request(
-        &app,
-        &network,
-        target,
-        0x0200,
-        frame,
-        laser::LASER_RESPONSE_TIMEOUT_MS,
-    )
-    .await?;
+    if require_status {
+        return laser_5khz_query_status(&app, &network, target)
+            .await
+            .map(Some);
+    }
 
-    match laser_5khz::parse_status(&resp) {
-        Ok(status) => Ok(Some(status)),
-        Err(e) => {
-            if require_status {
-                Err(format!(
-                    "5kHz 激光器状态解析失败: {}（应答: {}）",
-                    e,
-                    hex_bytes(&resp)
-                ))
-            } else {
-                log::debug!(
-                    "5kHz laser command {} ok, response: {}",
-                    action,
-                    hex_bytes(&resp)
-                );
-                Ok(None)
+    // 文档只定义了状态查询(0xFF)的应答帧，开光/关光/设频率/设电流/设脉宽
+    // 等设置类命令没有 ACK。这里发送成功即视为完成，不再等待 0x0200 应答，
+    // 否则每次操作都会白等 1 秒后误报超时。
+    send_frame(&app, &network, target, 0x0200, frame).await?;
+    Ok(None)
+}
+
+/// 查询 5kHz 主控板状态。
+///
+/// 激光器串口是总线结构，一次查询会返回多帧：主控第一帧(0x00)、主控
+/// 第二帧(0x99)、驱动板(0x0A)、温控板(0x3C/0x3D)。设备端按串口接收
+/// 分段透传，主控帧不一定在第一段里。这里在超时周期内多次重发查询
+/// （每次重发都会把设备的 UDP 回包目标重新指回本机，抵消其它客户端抢占），
+/// 收集 0x00/0x99/0x3C/0x3D，合并成一份完整状态。
+async fn laser_5khz_query_status(
+    app: &AppHandle,
+    network: &UdpNetwork,
+    target: SocketAddr,
+) -> Result<LaserStatus, String> {
+    /// 两次查询之间的间隔；协议要求主控查询指令间隔 >= 150ms
+    const POLL_INTERVAL_MS: u64 = 200;
+    /// 拿到主控第一帧后，再等其它板卡帧的时间
+    const SIBLING_GRACE_MS: u64 = 200;
+
+    let mut rx = subscribe_frames(app).await;
+    let timeout = std::time::Duration::from_millis(laser::LASER_RESPONSE_TIMEOUT_MS);
+    let deadline = tokio::time::Instant::now() + timeout;
+    let mut next_poll = tokio::time::Instant::now();
+    let mut sibling_deadline: Option<tokio::time::Instant> = None;
+    let mut buf: Vec<u8> = Vec::new();
+    let mut received: Vec<u8> = Vec::new();
+    let mut main_status: Option<LaserStatus> = None;
+    let mut aux_status: Option<LaserStatus> = None;
+    let mut ld_temp: Option<LaserStatus> = None;
+    let mut shg_temp: Option<LaserStatus> = None;
+
+    loop {
+        for (addr, status) in laser_5khz::take_status_frames(&mut buf) {
+            match addr {
+                laser_5khz::MAIN_ADDR if main_status.is_none() => {
+                    main_status = Some(status);
+                    sibling_deadline = Some(
+                        tokio::time::Instant::now()
+                            + std::time::Duration::from_millis(SIBLING_GRACE_MS),
+                    );
+                }
+                laser_5khz::MAIN_ADDR_2 if aux_status.is_none() => aux_status = Some(status),
+                laser_5khz::TEMP_ADDR_LD if ld_temp.is_none() => ld_temp = Some(status),
+                laser_5khz::TEMP_ADDR_SHG if shg_temp.is_none() => shg_temp = Some(status),
+                _ => {}
             }
         }
+
+        if main_status.is_some() {
+            let all_ready =
+                aux_status.is_some() && ld_temp.is_some() && shg_temp.is_some();
+            let grace_expired = sibling_deadline
+                .map(|d| tokio::time::Instant::now() >= d)
+                .unwrap_or(false);
+            if all_ready || grace_expired {
+                return Ok(merge_status(
+                    main_status.take().unwrap(),
+                    aux_status.take(),
+                    ld_temp.take(),
+                    shg_temp.take(),
+                ));
+            }
+        }
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            break;
+        }
+
+        if now >= next_poll {
+            send_frame(
+                app,
+                network,
+                target,
+                0x0200,
+                laser_5khz::build_query_status(),
+            )
+            .await?;
+            next_poll = now + std::time::Duration::from_millis(POLL_INTERVAL_MS);
+        }
+
+        let wait_until = sibling_deadline
+            .map(|d| d.min(next_poll))
+            .unwrap_or(next_poll)
+            .min(deadline);
+        let wait = wait_until.saturating_duration_since(tokio::time::Instant::now());
+        if wait.is_zero() {
+            continue;
+        }
+
+        match tokio::time::timeout(wait, rx.recv()).await {
+            Ok(Ok((frame, addr))) if frame.cmd == 0x0200 && addr.ip() == target.ip() => {
+                received.extend_from_slice(&frame.data);
+                buf.extend_from_slice(&frame.data);
+            }
+            Ok(Ok(_)) => continue,
+            Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+            Ok(Err(_)) => break,
+            Err(_) => continue, // 到下一次重发或等待其它板卡帧的时间点
+        }
     }
+
+    if let Some(main) = main_status.take() {
+        return Ok(merge_status(
+            main,
+            aux_status.take(),
+            ld_temp.take(),
+            shg_temp.take(),
+        ));
+    }
+
+    Err(format!(
+        "5kHz 激光器未返回主控板状态帧（已收到: {}）",
+        hex_bytes(&received)
+    ))
+}
+
+/// 合并主控第一帧、第二帧和两块温控板的数据
+fn merge_status(
+    mut main: LaserStatus,
+    aux: Option<LaserStatus>,
+    ld_temp: Option<LaserStatus>,
+    shg_temp: Option<LaserStatus>,
+) -> LaserStatus {
+    if let Some(aux) = aux {
+        main.ld_current_ma = aux.ld_current_ma;
+    }
+    if let Some(temp) = ld_temp {
+        main.ld_temp_c = temp.ld_temp_c;
+        main.ld_temp_error = temp.ld_temp_error;
+    }
+    if let Some(temp) = shg_temp {
+        main.shg_temp_c = temp.shg_temp_c;
+        main.shg_temp_error = temp.shg_temp_error;
+    }
+    main
 }
 
 /// 电机控制单步：发送 OpCode → 发送数据 → 取应答 → 结束帧

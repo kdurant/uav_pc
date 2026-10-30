@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { LaserStatus } from "../../types";
 import { useToast } from "../../composables/useToast";
@@ -56,13 +56,15 @@ watch(
   { immediate: true }
 );
 
-async function laserAction(action: string, value?: number): Promise<boolean> {
+async function laserAction(action: string, value?: number, quiet = false): Promise<boolean> {
   if (!props.connected || !props.deviceIp) return false;
   if (laserUnavailable.value) {
-    toast.error("激光器不可用", "当前激光器协议未配置或不支持，请检查配置文件");
+    if (!quiet) {
+      toast.error("激光器不可用", "当前激光器协议未配置或不支持，请检查配置文件");
+    }
     return false;
   }
-  laserBusy.value = true;
+  if (!quiet) laserBusy.value = true;
   try {
     const status = await invoke<LaserStatus | null>("laser_command", {
       deviceIp: props.deviceIp,
@@ -73,13 +75,12 @@ async function laserAction(action: string, value?: number): Promise<boolean> {
     return true;
   } catch (e) {
     console.error(`laser_command ${action} failed:`, e);
-    toast.error(
-      `${LASER_ACTION_LABELS[action] ?? action}失败`,
-      String(e)
-    );
+    if (!quiet) {
+      toast.error(`${LASER_ACTION_LABELS[action] ?? action}失败`, String(e));
+    }
     return false;
   } finally {
-    laserBusy.value = false;
+    if (!quiet) laserBusy.value = false;
   }
 }
 
@@ -135,27 +136,79 @@ async function clearLaserError() {
   await laserAction("clear_error");
 }
 
-async function queryLaserStatus() {
-  const ok = await laserAction("status");
-  if (!ok || !laserStatus.value) return;
+async function queryLaserStatus(quiet = false): Promise<boolean> {
+  const ok = await laserAction("status", undefined, quiet);
+  if (!ok || !laserStatus.value) return false;
 
   const s = laserStatus.value;
-  laserEnabled.value = s.status !== 0;
 
-  // 5kHz 状态帧带回设定值，同步到输入框，便于现场核对
-  if (s.status_flags != null) {
-    laserMode.value = s.status_flags & 0x02 ? 1 : 0;
+  // 轮询只刷新状态表格，不用设备读数覆盖“激光使能”开关，
+  // 避免激光器响应延迟时开关被短暂改回。手动查询才回填控制项。
+  if (!quiet) {
+    laserEnabled.value = s.status !== 0;
+    if (s.status_flags != null) {
+      laserMode.value = s.status_flags & 0x02 ? 1 : 0;
+    }
+    if (s.freq_set_hz != null && s.freq_set_hz > 0) {
+      laserFreq.value = s.freq_set_hz;
+    }
+    if (s.pulse_width_us != null) {
+      laserPulseWidth.value = s.pulse_width_us;
+    }
+    if (s.ld_current_ma != null) {
+      laserCurrent.value = s.ld_current_ma;
+    }
   }
-  if (s.freq_set_hz != null && s.freq_set_hz > 0) {
-    laserFreq.value = s.freq_set_hz;
+  return true;
+}
+
+/** 状态查询使能：开启后每秒自动查询一次 */
+const laserPolling = ref(false);
+let pollTimer: number | null = null;
+let pollInFlight = false;
+let pollFailures = 0;
+
+function stopLaserPolling() {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
   }
-  if (s.pulse_width_us != null) {
-    laserPulseWidth.value = s.pulse_width_us;
-  }
-  if (s.ld_current_ma != null) {
-    laserCurrent.value = s.ld_current_ma;
+  laserPolling.value = false;
+}
+
+async function pollLaserStatus() {
+  if (!laserPolling.value || pollInFlight || laserBusy.value) return;
+  pollInFlight = true;
+  try {
+    const ok = await queryLaserStatus(true);
+    if (!laserPolling.value) return;
+    if (ok) {
+      pollFailures = 0;
+    } else if (++pollFailures >= 3) {
+      stopLaserPolling();
+      toast.warning("状态查询已停止", "连续 3 次未获取到激光器状态");
+    }
+  } finally {
+    pollInFlight = false;
   }
 }
+
+function toggleLaserPolling() {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  if (!laserPolling.value) return; // 用户已关闭
+  if (laserUnavailable.value || !props.connected) {
+    laserPolling.value = false;
+    return;
+  }
+  pollFailures = 0;
+  void pollLaserStatus();
+  pollTimer = window.setInterval(pollLaserStatus, 1000);
+}
+
+onUnmounted(stopLaserPolling);
 
 /** 断开连接时清空设备读数 */
 watch(
@@ -163,9 +216,20 @@ watch(
   (connected) => {
     if (!connected) {
       laserStatus.value = null;
+      stopLaserPolling();
     }
   }
 );
+
+/** 温控板错误位：bit0 过温，bit1 过低 */
+const tempAlarm = computed(() => {
+  const s = laserStatus.value;
+  if (!s) return null;
+  const flags = (s.ld_temp_error ?? 0) | (s.shg_temp_error ?? 0);
+  if (flags & 0x01) return "温控过温保护，激光器可能已自动关光";
+  if (flags & 0x02) return "温控温度过低保护";
+  return null;
+});
 
 const laserStatusItems = computed(() => {
   const s = laserStatus.value;
@@ -201,6 +265,14 @@ const laserStatusItems = computed(() => {
       },
       { label: "温度1", value: s?.temp1_c != null ? `${s.temp1_c} ℃` : dash },
       { label: "温度2", value: s?.temp2_c != null ? `${s.temp2_c} ℃` : dash },
+      {
+        label: "LD温控",
+        value: s?.ld_temp_c != null ? `${s.ld_temp_c.toFixed(2)} ℃` : dash,
+      },
+      {
+        label: "倍频温控",
+        value: s?.shg_temp_c != null ? `${s.shg_temp_c.toFixed(2)} ℃` : dash,
+      },
       { label: "调Q延时", value: s?.q_delay_us != null ? `${s.q_delay_us} µs` : dash },
       { label: "工作时间", value: s?.work_time_s != null ? `${s.work_time_s} s` : dash },
       {
@@ -315,13 +387,21 @@ const laserStatusItems = computed(() => {
         </label>
       </div>
 
-      <button
-        class="accent block status-query"
-        :disabled="laserBusy || laserUnavailable"
-        @click="queryLaserStatus"
-      >
-        {{ laserUnavailable ? "协议未配置" : laserBusy ? "查询中..." : "查询状态" }}
-      </button>
+      <div class="switch-row card-row status-query">
+        <span class="switch-row-label">
+          状态查询
+          <i class="switch-hint">{{ laserPolling ? '每秒刷新' : '已停止' }}</i>
+        </span>
+        <label class="switch">
+          <input
+            type="checkbox"
+            v-model="laserPolling"
+            :disabled="laserUnavailable || !connected"
+            @change="toggleLaserPolling"
+          />
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+        </label>
+      </div>
       <button
         v-if="laserType === 'laser_5kHz'"
         class="block"
@@ -331,15 +411,73 @@ const laserStatusItems = computed(() => {
         清除报警
       </button>
 
-      <div class="feedback-list">
-        <div v-for="item in laserStatusItems" :key="item.label" class="feedback-row">
-          <span class="feedback-name">{{ item.label }}</span>
-          <span class="feedback-val">{{ item.value }}</span>
+      <p v-if="tempAlarm" class="laser-warning">{{ tempAlarm }}</p>
+
+      <div class="laser-status-table">
+        <div v-for="item in laserStatusItems" :key="item.label" class="laser-status-cell">
+          <span class="laser-status-name">{{ item.label }}</span>
+          <span class="laser-status-val">{{ item.value }}</span>
         </div>
       </div>
 
-      <p class="hint">未查询或未连接时显示占位值；点击“查询状态”刷新读数。</p>
+      <p class="hint">未使能状态查询或未连接时显示占位值；打开“状态查询”后每秒刷新读数。</p>
       <p class="hint">激光器命令经采集卡透传，单次操作最长等待 1 秒；打开时会自动重新下发电流。</p>
     </section>
   </div>
 </template>
+
+<style scoped>
+/* 状态读数用两列网格排布，比逐行列表更紧凑 */
+.laser-status-table {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 4px;
+  background: var(--border-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.laser-status-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 9px;
+  background: var(--bg-inset);
+}
+
+/* 奇数项时最后一个单元格占满整行，避免右侧留空 */
+.laser-status-cell:nth-child(odd):last-child {
+  grid-column: span 2;
+}
+
+.laser-status-name {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.laser-status-val {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 520px) {
+  .laser-status-table {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .laser-status-cell:nth-child(odd):last-child {
+    grid-column: auto;
+  }
+}
+</style>

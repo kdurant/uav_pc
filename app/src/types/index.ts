@@ -138,6 +138,14 @@ export interface LaserStatus {
     ld_current_ma?: number | null;
     temp1_c?: number | null;
     temp2_c?: number | null;
+    /** 振荡级 LD 温控实际温度（℃，0x3C 帧） */
+    ld_temp_c?: number | null;
+    /** 倍频晶体温控实际温度（℃，0x3D 帧） */
+    shg_temp_c?: number | null;
+    /** 振荡级 LD 温控错误位：bit0 过温，bit1 过低 */
+    ld_temp_error?: number | null;
+    /** 倍频晶体温控错误位：bit0 过温，bit1 过低 */
+    shg_temp_error?: number | null;
     q_delay_us?: number | null;
     work_time_s?: number | null;
     status_flags?: number | null;
