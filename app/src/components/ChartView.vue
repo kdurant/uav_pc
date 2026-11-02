@@ -2,20 +2,29 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import { useChart } from "../composables/useChart";
 
+// 注意：defineProps 默认值会提升到 setup 之外，不能引用本地声明的变量，
+// 因此通道名称默认值直接内联（CH0 APD / CH1 低增益 / CH2 高增益 / CH3 PIN主波）
 const props = withDefaults(
   defineProps<{
     channelCount?: number;
     maxPoints?: number;
     lineColors?: string[];
     channelVisible?: boolean[];
+    channelNames?: string[];
   }>(),
   {
     channelCount: 4,
     maxPoints: 4000,
     lineColors: () => ["#2f6fed", "#ef4444", "#f59e0b", "#10b981"],
     channelVisible: () => [true, true, true, true],
+    channelNames: () => ["APD（AD3)", "低增益(AD1)", "高增益(AD0)", "PIN主波"],
   }
 );
+
+/** 获取通道显示名，缺省回退为 CHx */
+function channelLabel(ch: number): string {
+  return props.channelNames[ch] || `CH${ch}`;
+}
 
 const emit = defineEmits<{
   (e: "update:channelVisible", value: boolean[]): void;
@@ -480,23 +489,37 @@ function render(buffers: Float64Array[]) {
 
   ctx.restore();
 
-  // 通道图例（胶囊样式，位于绘图区上方的留白内）
+  // 通道图例（胶囊样式，右对齐到绘图区右上角）
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
+  ctx.font = `600 ${fontSize}px "Inter", "PingFang SC", sans-serif`;
   const legendY = 15;
-  let legendX = margin.left;
-  for (let ch = 0; ch < Math.min(buffers.length, 4); ch++) {
+  const legendCount = Math.min(buffers.length, 4);
+  const legendBoxH = 21;
+  const legendGap = 6;
+
+  // 先测量每个胶囊宽度，以便整体右对齐
+  const legendBoxW: number[] = [];
+  let legendTotalW = 0;
+  for (let ch = 0; ch < legendCount; ch++) {
+    const w = ctx.measureText(channelLabel(ch)).width + 30;
+    legendBoxW.push(w);
+    legendTotalW += w;
+  }
+  legendTotalW += legendGap * Math.max(0, legendCount - 1);
+
+  // 右对齐；画布过窄时回退到左边界，避免溢出
+  let legendX = Math.max(margin.left, margin.left + plotW - legendTotalW);
+  for (let ch = 0; ch < legendCount; ch++) {
     const visible = props.channelVisible[ch];
     const color = visible ? props.lineColors[ch] || "#2f6fed" : hiddenColor;
-    const label = `CH${ch}`;
-    ctx.font = `600 ${fontSize}px "Inter", "PingFang SC", sans-serif`;
-    const boxW = ctx.measureText(label).width + 30;
-    const boxH = 21;
+    const label = channelLabel(ch);
+    const boxW = legendBoxW[ch];
 
     // 胶囊底色
     ctx.fillStyle = visible ? withAlpha(props.lineColors[ch] || "#2f6fed", 0.09) : "rgba(147, 160, 180, 0.07)";
     ctx.beginPath();
-    ctx.roundRect(legendX, legendY - boxH / 2, boxW, boxH, 6);
+    ctx.roundRect(legendX, legendY - legendBoxH / 2, boxW, legendBoxH, 6);
     ctx.fill();
 
     // 色块
@@ -509,7 +532,7 @@ function render(buffers: Float64Array[]) {
     ctx.fillStyle = visible ? "#4a5568" : "#a3adbd";
     ctx.fillText(label, legendX + 23, legendY + 0.5);
 
-    legendX += boxW + 6;
+    legendX += boxW + legendGap;
   }
   ctx.textBaseline = "alphabetic";
 
@@ -591,7 +614,7 @@ function render(buffers: Float64Array[]) {
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      tipLines.push(`CH${ch} = ${val.toFixed(1)}`);
+      tipLines.push(`${channelLabel(ch)} = ${val.toFixed(1)}`);
       tipColors.push(color);
     }
 
@@ -726,7 +749,7 @@ onUnmounted(() => {
         :style="{ '--ch-color': props.lineColors[ch - 1] }"
       >
         <span class="vpp-dot"></span>
-        <span class="vpp-ch">CH{{ ch - 1 }}</span>
+        <span class="vpp-ch">{{ channelLabel(ch - 1) }}</span>
         <span class="vpp-val">{{ vppValues[ch - 1] ?? '--' }}</span>
       </span>
     </div>
@@ -757,7 +780,7 @@ onUnmounted(() => {
         >
           <input type="checkbox" :checked="props.channelVisible[ch - 1]" @change="toggleCh(ch - 1)" />
           <span class="ch-swatch"></span>
-          <span>CH{{ ch - 1 }}</span>
+          <span>{{ channelLabel(ch - 1) }}</span>
         </label>
       </div>
 
