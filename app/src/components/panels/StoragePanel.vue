@@ -43,6 +43,12 @@ async function toggleStore() {
     toast.warning("请先连接设备", "存储开关需要设备在线后才能操作");
     return;
   }
+  // SATA 未连接时拦截：只提示用户，不向设备发送任何指令
+  if (enable && props.status && props.status.sata_dev_identify_done !== 1) {
+    storeEnabled.value = false;
+    toast.warning("SATA 未连接", "请确认 SATA 硬盘已连接后再开始存储");
+    return;
+  }
   if (enable && (!storeFilename.value.trim() || storeFilenameAuto.value)) {
     storeFilename.value = defaultStoreName();
     storeFilenameAuto.value = true;
@@ -356,6 +362,9 @@ async function refreshGpsFiles() {
           <span class="switch-track"><span class="switch-thumb"></span></span>
         </label>
       </div>
+      <p v-if="props.status && props.status.sata_dev_identify_done !== 1" class="hint">
+        SATA 未连接，无法开始存储，请检查硬盘连接。
+      </p>
       <label class="field block-field">
         <span class="field-label">文件名</span>
         <input
