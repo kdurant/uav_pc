@@ -106,7 +106,16 @@ const trigModes = [
 ];
 
 async function setTrgMode() {
-  await sendParam(0x0f03, trgMode.value);
+  if (!props.connected || !props.deviceIp) return;
+  try {
+    await invoke("set_trg_mode", {
+      deviceIp: props.deviceIp,
+      mode: trgMode.value,
+    });
+  } catch (e) {
+    console.error("set_trg_mode failed:", e);
+    toast.error("设置采集模式失败", String(e));
+  }
 }
 </script>
 

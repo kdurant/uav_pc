@@ -172,6 +172,7 @@ pub fn run() {
             commands::query_sys_status,
             commands::send_ref_channel,
             commands::send_command,
+            commands::set_trg_mode,
             commands::laser_command,
             commands::motor_command,
             commands::load_temperature_history,

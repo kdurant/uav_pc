@@ -560,6 +560,48 @@ pub async fn send_command(
     Ok(())
 }
 
+/// 设置信号采集模式（0x0f03）。
+///
+/// PIN 触发（mode=2）时，先用 0x0321 下发 pin 通道触发阈值，
+/// 阈值取自 config.toml 的 `[capture].pin_threshold`。
+#[tauri::command]
+pub async fn set_trg_mode(
+    app: AppHandle,
+    device_ip: String,
+    mode: u32,
+) -> Result<(), String> {
+    if mode > 2 {
+        return Err(format!("无效的信号采集模式: {mode}"));
+    }
+
+    let network = get_or_init_network(&app).await?;
+    let target = device_target(&app, &device_ip).await?;
+
+    if mode == 2 {
+        let pin_threshold = app.state::<AppConfig>().capture.pin_threshold;
+        send_frame(
+            &app,
+            &network,
+            target,
+            0x0321,
+            pin_threshold.to_be_bytes().to_vec(),
+        )
+        .await?;
+        log::info!("PIN 触发阈值已下发: {}", pin_threshold);
+    }
+
+    send_frame(
+        &app,
+        &network,
+        target,
+        0x0f03,
+        mode.to_be_bytes().to_vec(),
+    )
+    .await?;
+    log::info!("信号采集模式已设置: {}", mode);
+    Ok(())
+}
+
 mod cloud;
 mod control;
 mod replay;

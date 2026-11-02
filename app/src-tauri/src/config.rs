@@ -163,7 +163,7 @@ impl Default for CaptureConfig {
             second_len: 400,
             sum_value: 0,
             max_value: 0,
-            pin_threshold: 1000,
+            pin_threshold: 2000,
         }
     }
 }
@@ -239,7 +239,7 @@ second_pos = 400
 second_len = 400
 sum_value = 0
 max_value = 0
-pin_threshold = 1000
+pin_threshold = 2000
 "#;
 
     #[test]
