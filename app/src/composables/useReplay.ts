@@ -101,6 +101,16 @@ async function loadFile(path: string) {
         frameIndex.value = 0;
         await showFrame(0);
         toast.success("回放文件已加载", `共 ${result.frame_count.toLocaleString("zh-CN")} 帧`);
+        if (result.skipped_bytes > 0) {
+            const skipped =
+                result.skipped_bytes >= 1024 * 1024
+                    ? `${(result.skipped_bytes / 1024 / 1024).toFixed(1)} MB`
+                    : `${(result.skipped_bytes / 1024).toFixed(1)} KB`;
+            toast.warning(
+                "文件末尾数据不完整",
+                `已忽略无法解析的 ${skipped}，仅回放前面的 ${result.frame_count.toLocaleString("zh-CN")} 帧`
+            );
+        }
     } catch (e) {
         console.error("open_replay_file failed:", e);
         info.value = null;

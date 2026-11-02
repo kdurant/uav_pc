@@ -65,6 +65,14 @@ pub struct LaserStatus {
     pub temp1_c: Option<i8>,
     /// 温度检测 2（℃）
     pub temp2_c: Option<i8>,
+    /// 振荡级 LD 温控实际温度（℃，来自 0x3C 帧）
+    pub ld_temp_c: Option<f64>,
+    /// 倍频晶体温控实际温度（℃，来自 0x3D 帧）
+    pub shg_temp_c: Option<f64>,
+    /// 振荡级 LD 温控错误位（0x3C 帧，bit0 过温 / bit1 过低）
+    pub ld_temp_error: Option<u8>,
+    /// 倍频晶体温控错误位（0x3D 帧，bit0 过温 / bit1 过低）
+    pub shg_temp_error: Option<u8>,
     /// 调 Q 延时（µs）
     pub q_delay_us: Option<u16>,
     /// 出光/工作时间（s）
