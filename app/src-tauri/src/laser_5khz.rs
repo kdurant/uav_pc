@@ -135,7 +135,6 @@ fn parse_status_frame(data: &[u8]) -> Result<LaserStatus, String> {
         freq_detected_hz: Some(u32_at(data, 4)),
         freq_set_hz: Some(u32_at(data, 8)),
         pulse_width_us: Some(u16_at(data, 12)),
-        ld_current_ma: Some(u16_at(data, 22).saturating_mul(10)),
         temp1_c: Some(data[28] as i8),
         temp2_c: Some(data[29] as i8),
         q_delay_us: Some(u16_at(data, 34)),
@@ -145,8 +144,13 @@ fn parse_status_frame(data: &[u8]) -> Result<LaserStatus, String> {
         ..Default::default()
     };
 
-    // 温控板帧的 8-11 字节是实际温度（×10000，有符号），46 字节是错误位
     match data[2] {
+        // LD 预置电流只在主控第二帧(0x99)的 22-23 字节，单位 0.01A。
+        // 主控第一帧(0x00)这里是预留位，不能当作电流解析，否则会显示 0。
+        MAIN_ADDR_2 => {
+            status.ld_current_ma = Some(u16_at(data, 22).saturating_mul(10));
+        }
+        // 温控板帧的 8-11 字节是实际温度（×10000，有符号），46 字节是错误位
         TEMP_ADDR_LD => {
             status.ld_temp_c = Some(i32_at(data, 8) as f64 / 10000.0);
             status.ld_temp_error = Some(data[46]);
@@ -270,7 +274,7 @@ mod tests {
         assert_eq!(status.freq_detected_hz, Some(5000));
         assert_eq!(status.freq_set_hz, Some(4000));
         assert_eq!(status.pulse_width_us, Some(60));
-        assert_eq!(status.ld_current_ma, Some(1000));
+        assert_eq!(status.ld_current_ma, None); // 0x00 帧的 22-23 是预留位
         assert_eq!(status.temp1_c, Some(30));
         assert_eq!(status.temp2_c, Some(-5));
         assert_eq!(status.q_delay_us, Some(10));
@@ -331,8 +335,18 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_temp_frames() {
-        // 温控帧：8-11 字节是实际温度（×10000，有符号），46 字节是错误位
+    fn test_ld_current_only_from_second_frame() {
+        let main = make_status_frame(MAIN_ADDR, 7);
+        assert_eq!(parse_status_frame(&main).unwrap().ld_current_ma, None);
+
+        let mut aux = make_status_frame(MAIN_ADDR_2, 7);
+        aux[22..24].copy_from_slice(&300u16.to_le_bytes()); // 3.00 A
+        aux[47] = checksum(&aux[..47]);
+        assert_eq!(parse_status_frame(&aux).unwrap().ld_current_ma, Some(3000));
+    }
+
+    #[test]
+    fn test_parse_temp_frames() {        // 温控帧：8-11 字节是实际温度（×10000，有符号），46 字节是错误位
         let mut ld = make_status_frame(TEMP_ADDR_LD, 7);
         ld[8..12].copy_from_slice(&380038i32.to_le_bytes());
         ld[46] = 0x01; // ERR_TEMP_OVER

@@ -71,7 +71,19 @@ async function laserAction(action: string, value?: number, quiet = false): Promi
       action,
       value,
     });
-    if (status) laserStatus.value = status;
+    if (status) {
+      // 轮询时某次可能只收到主控帧，0x99/0x3C/0x3D 从板帧缺失；
+      // 这些字段为空时沿用上一次有效值，避免读数在真实值和占位值之间跳变。
+      const prev = laserStatus.value;
+      if (prev) {
+        if (status.ld_current_ma == null) status.ld_current_ma = prev.ld_current_ma;
+        if (status.ld_temp_c == null) status.ld_temp_c = prev.ld_temp_c;
+        if (status.shg_temp_c == null) status.shg_temp_c = prev.shg_temp_c;
+        if (status.ld_temp_error == null) status.ld_temp_error = prev.ld_temp_error;
+        if (status.shg_temp_error == null) status.shg_temp_error = prev.shg_temp_error;
+      }
+      laserStatus.value = status;
+    }
     return true;
   } catch (e) {
     console.error(`laser_command ${action} failed:`, e);
