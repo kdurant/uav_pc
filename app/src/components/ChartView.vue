@@ -54,6 +54,52 @@ const showDots = ref(false);
 const showGrid = ref(true);
 const autoRefresh = ref(true);
 
+// ===== 空闲基线对齐 =====
+// 开启时把每个通道当前的空闲电平作为自身基准，显示时减去该基准，
+// 让 4 个通道统一落在 0 基线上，便于直接对比信号。
+// 基准在开启瞬间锁定（使用中位数，避免尖峰噪声影响）；若某个通道当时没有数据，
+// 会在它首次出现数据时单独补做校准，不会影响已经对齐的通道。
+const baselineAlign = ref(false);
+/** 各通道需要减去的基准值；undefined 表示该通道还没校准 */
+const baselineOffsets: number[] = [];
+
+/** 计算单个通道的中位数（忽略 NaN），空闲电平的稳健估计；无数据返回 null */
+function channelMedian(buf?: Float64Array): number | null {
+  if (!buf) return null;
+  const values: number[] = [];
+  for (let i = 0; i < buf.length; i++) {
+    const v = buf[i];
+    if (Number.isFinite(v)) values.push(v);
+  }
+  if (values.length === 0) return null;
+  values.sort((a, b) => a - b);
+  const mid = values.length >> 1;
+  return values.length % 2 === 1 ? values[mid] : (values[mid - 1] + values[mid]) / 2;
+}
+
+/** 为尚未校准的通道补做校准；已有基准的通道保持不变 */
+function calibrateBaseline(buffers: Float64Array[]) {
+  for (let ch = 0; ch < props.channelCount; ch++) {
+    if (baselineOffsets[ch] !== undefined) continue;
+    const median = channelMedian(buffers[ch]);
+    if (median !== null) baselineOffsets[ch] = median;
+  }
+}
+
+/** 通道当前的基线偏移：未开启对齐时恒为 0 */
+function channelOffset(ch: number): number {
+  return baselineAlign.value ? baselineOffsets[ch] ?? 0 : 0;
+}
+
+/** 开关切换：开启时立即用当前帧各通道中位数校准，关闭时清除全部基准 */
+function onBaselineToggle() {
+  baselineOffsets.length = 0;
+  if (baselineAlign.value) {
+    calibrateBaseline(lastRenderState.buffers);
+  }
+  chart.markDirty();
+}
+
 // 网格缓存（始终强制重绘以响应 showGrid 切换）
 let lastYMin = NaN;
 let lastYMax = NaN;
@@ -339,6 +385,9 @@ function render(buffers: Float64Array[]) {
     if (!hasData) vppValues.value = [];
   }
 
+  // 基线对齐：为开启时还没有数据的通道补做校准（已校准的通道不受影响）
+  if (baselineAlign.value) calibrateBaseline(buffers);
+
   // 计算 Y 轴范围
   let yMin: number, yMax: number;
   if (useManualRangeY.value) {
@@ -352,8 +401,9 @@ function render(buffers: Float64Array[]) {
       const buf = buffers[ch];
       const end = Math.min(startIdx + visibleLen, buf.length);
       for (let i = startIdx; i < end; i++) {
-        const v = buf[i];
-        if (!Number.isFinite(v)) continue; // 空档（无数据）
+        const raw = buf[i];
+        if (!Number.isFinite(raw)) continue; // 空档（无数据）
+        const v = raw - channelOffset(ch);
         if (v < yMin) yMin = v;
         if (v > yMax) yMax = v;
       }
@@ -465,11 +515,12 @@ function render(buffers: Float64Array[]) {
 
     let firstPoint = true;
     for (let i = startIdx; i < startIdx + visibleLen && i < buf.length; i++) {
-      const v = buf[i];
-      if (!Number.isFinite(v)) {
+      const raw = buf[i];
+      if (!Number.isFinite(raw)) {
         firstPoint = true; // 空档：断开折线，下一段重新起笔
         continue;
       }
+      const v = raw - channelOffset(ch);
       const x = margin.left + ((i - startIdx) / totalDrawn) * plotW;
       const y = margin.top + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
 
@@ -598,8 +649,9 @@ function render(buffers: Float64Array[]) {
       const buf = buffers[ch];
       if (nearIdx < 0 || nearIdx >= buf.length) continue;
 
-      const val = buf[nearIdx];
-      if (!Number.isFinite(val)) continue; // 空档：无数据
+      const raw = buf[nearIdx];
+      if (!Number.isFinite(raw)) continue; // 空档：无数据
+      const val = raw - channelOffset(ch);
       const px = margin.left + ((nearIdx - startIdx) / Math.max(1, visibleLen - 1)) * plotW;
       const py = margin.top + plotH - ((val - yMin) / (yMax - yMin || 1)) * plotH;
 
@@ -817,6 +869,14 @@ onUnmounted(() => {
         <label class="ch-chip plain">
           <input type="checkbox" v-model="showDots" @change="chart.markDirty()" />
           <span>圆点</span>
+        </label>
+        <label
+          class="ch-chip plain"
+          :class="{ aligned: baselineAlign }"
+          title="开启后把各通道空闲电平归零到同一基准；请在无信号时开启"
+        >
+          <input type="checkbox" v-model="baselineAlign" @change="onBaselineToggle" />
+          <span>基线对齐</span>
         </label>
         <label class="ch-chip plain" :class="{ paused: !autoRefresh }">
           <input type="checkbox" v-model="autoRefresh" @change="onRefreshToggle" />
@@ -1081,6 +1141,13 @@ canvas {
   color: var(--warning);
   background: var(--warning-soft);
   border-color: #f2dec2;
+}
+
+/* 基线对齐开启 */
+.ch-chip.aligned {
+  color: var(--accent-dim);
+  background: var(--accent-soft);
+  border-color: #c7d7fb;
 }
 
 /* 窄窗口：压缩工具条，隐藏操作提示 */
