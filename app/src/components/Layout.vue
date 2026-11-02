@@ -13,6 +13,7 @@ import ControlPanel from "./ControlPanel.vue";
 import TriggerModeDialog from "./TriggerModeDialog.vue";
 import ReplayBar from "./ReplayBar.vue";
 import CloudBar from "./CloudBar.vue";
+import DebugMenu from "./DebugMenu.vue";
 
 // three.js 体积较大，点云视图按需加载，避免拖慢首屏
 const PointCloudView = defineAsyncComponent(() => import("./PointCloudView.vue"));
@@ -365,47 +366,30 @@ handleSearch();
   <div class="layout">
     <!-- Top toolbar -->
     <header class="toolbar">
-      <div class="brand">
-        <div class="brand-mark">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-            stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2 13h4l2.4-6 3.1 12 3-9 2 3H22" />
-          </svg>
+      <div class="toolbar-left">
+        <div class="brand">
+          <div class="brand-mark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 13h4l2.4-6 3.1 12 3-9 2 3H22" />
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="app-title">无人机采集卡上位机</span>
+            <span class="app-subtitle radar-name">{{ radarDisplayName }}</span>
+          </div>
         </div>
-        <div class="brand-text">
-          <span class="app-title">无人机采集卡上位机</span>
-          <span class="app-subtitle radar-name">{{ radarDisplayName }}</span>
-        </div>
+
+        <!-- 调试菜单：离线回放 / 点云地形，需密码解锁 -->
+        <DebugMenu
+          :replay-active="replayActive"
+          :cloud-active="cloudActive"
+          @replay="toggleReplay"
+          @cloud="toggleCloud"
+        />
       </div>
 
       <div class="toolbar-right">
-        <button
-          class="tool-btn"
-          :class="{ active: replayActive }"
-          :title="replayActive ? '退出离线回放，恢复实时预览' : '按帧回放本地采集数据文件'"
-          @click="toggleReplay"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-            stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 5v14l9-7-9-7z" />
-            <path d="M14 5h2v14h-2z" />
-          </svg>
-          {{ replayActive ? "退出回放" : "离线回放" }}
-        </button>
-        <button
-          class="tool-btn"
-          :class="{ active: cloudActive }"
-          :title="cloudActive ? '退出点云模式' : '把采集数据生成水下地形点云 / DEM'"
-          @click="toggleCloud"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-            stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" />
-            <path d="M4 7.5l8 4.5 8-4.5" />
-            <path d="M12 12v9" />
-          </svg>
-          {{ cloudActive ? "退出点云" : "点云" }}
-        </button>
         <div class="conn-pill" :class="connectionClass">
           <span class="conn-dot"></span>
           <span class="conn-label">{{ statusLabel }}</span>
@@ -604,27 +588,11 @@ handleSearch();
   gap: 10px;
 }
 
-.tool-btn.active {
-  border-color: var(--accent);
-  color: var(--accent-dim);
-  background: var(--accent-glow, #eff4ff);
-}
-
-.tool-btn {
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-  font-size: 12.5px;
-}
-
-.tool-btn svg {
-  width: 13px;
-  height: 13px;
-  color: var(--text-tertiary);
-}
-
-.tool-btn:hover svg {
-  color: var(--accent-dim);
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
 }
 
 /* 连接状态胶囊 */
