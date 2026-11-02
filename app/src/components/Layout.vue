@@ -14,6 +14,7 @@ import TriggerModeDialog from "./TriggerModeDialog.vue";
 import ReplayBar from "./ReplayBar.vue";
 import CloudBar from "./CloudBar.vue";
 import DebugMenu from "./DebugMenu.vue";
+import ConfigDialog from "./ConfigDialog.vue";
 
 // three.js 体积较大，点云视图按需加载，避免拖慢首屏
 const PointCloudView = defineAsyncComponent(() => import("./PointCloudView.vue"));
@@ -79,6 +80,8 @@ function toggleCloud() {
 
 const connectionState = ref<ConnectionState>(ConnectionState.Disconnected);
 const showDeviceSelector = ref(false);
+// 配置设置弹窗
+const showConfig = ref(false);
 const isConnecting = ref(false);
 
 // 通道可见性
@@ -390,6 +393,14 @@ handleSearch();
       </div>
 
       <div class="toolbar-right">
+        <button class="tool-btn" title="打开配置文件设置（保存后需重启生效）" @click="showConfig = true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3.2" />
+            <path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06A1.7 1.7 0 0015 19.4a1.7 1.7 0 00-1 .6 1.7 1.7 0 00-.4 1.1V21a2 2 0 11-4 0v-.09A1.7 1.7 0 009 19.4a1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-.6-1 1.7 1.7 0 00-1.1-.4H2.9a2 2 0 110-4h.09A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-.6 1.7 1.7 0 00.4-1.1V2.9a2 2 0 114 0v.09A1.7 1.7 0 0015 4.6a1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9a1.7 1.7 0 00.6 1 1.7 1.7 0 001.1.4h.09a2 2 0 110 4h-.09a1.7 1.7 0 00-1.1.4z" />
+          </svg>
+          设置
+        </button>
         <div class="conn-pill" :class="connectionClass">
           <span class="conn-dot"></span>
           <span class="conn-label">{{ statusLabel }}</span>
@@ -497,6 +508,9 @@ handleSearch();
       :min-level="status?.min_level"
     />
 
+    <!-- 配置文件设置 -->
+    <ConfigDialog v-model:visible="showConfig" />
+
   </div>
 </template>
 
@@ -593,6 +607,23 @@ handleSearch();
   align-items: center;
   gap: 14px;
   min-width: 0;
+}
+
+.tool-btn {
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+
+.tool-btn svg {
+  width: 13px;
+  height: 13px;
+  color: var(--text-tertiary);
+}
+
+.tool-btn:hover svg {
+  color: var(--accent-dim);
 }
 
 /* 连接状态胶囊 */

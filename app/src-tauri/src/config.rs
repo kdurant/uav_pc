@@ -212,6 +212,124 @@ impl AppConfig {
         );
         Ok(config)
     }
+
+    /// 校验配置合法性（保存前的最后一道关卡，前端校验可被绕过）
+    pub fn validate(&self) -> Result<(), String> {
+        // 网络
+        let local_ip = self.basic.local_ip.trim();
+        if local_ip.parse::<std::net::IpAddr>().is_err() {
+            return Err(format!(
+                "[basic].local_ip 不是合法的 IP 地址: {:?}",
+                self.basic.local_ip
+            ));
+        }
+        if self.basic.local_port == 0 {
+            return Err("[basic].local_port 必须在 1~65535 之间".to_string());
+        }
+        if self.basic.remote_port == 0 {
+            return Err("[basic].remote_port 必须在 1~65535 之间".to_string());
+        }
+        if !self.basic.broadcast_search {
+            let device_ip = self.basic.device_ip.trim();
+            if device_ip.is_empty() {
+                return Err(
+                    "[basic].broadcast_search = false 时必须配置 [basic].device_ip".to_string(),
+                );
+            }
+            if device_ip.parse::<std::net::IpAddr>().is_err() {
+                return Err(format!(
+                    "[basic].device_ip 不是合法的 IP 地址: {:?}",
+                    self.basic.device_ip
+                ));
+            }
+        }
+
+        // 雷达 / 激光器
+        let laser_type = self.radar.laser_type.trim();
+        if !laser_type.is_empty()
+            && !matches!(laser_type, "laser_connet" | "laserConnet" | "laser_5kHz")
+        {
+            return Err(format!(
+                "[radar].laser_type 不支持: {:?}（可选 laser_connet / laser_5kHz）",
+                self.radar.laser_type
+            ));
+        }
+
+        // 采集参数
+        if self.capture.ref_channal > 3 {
+            return Err("[capture].ref_channal 必须在 0~3 之间".to_string());
+        }
+        if self.capture.save_channal > 0xff {
+            return Err("[capture].save_channal 必须在 0~255 之间".to_string());
+        }
+        if self.capture.wave_len == 0 {
+            return Err("[capture].wave_len 必须大于 0".to_string());
+        }
+
+        // GPS
+        if self.gps.dir.trim().is_empty() {
+            return Err("[gps].dir 不能为空".to_string());
+        }
+
+        // SSD 分块大小（与下载实现一致，仅支持 1/2/4 MB）
+        if !matches!(self.ssd.chunk_mb, 1 | 2 | 4) {
+            return Err(format!(
+                "[ssd].chunk_mb 只能为 1、2 或 4，当前为 {}",
+                self.ssd.chunk_mb
+            ));
+        }
+
+        // 温度历史点数
+        const MAX_TEMP_POINTS: usize = 100_000;
+        if self.temperature.save_points == 0 || self.temperature.save_points > MAX_TEMP_POINTS {
+            return Err(format!(
+                "[temperature].save_points 必须在 1~{} 之间",
+                MAX_TEMP_POINTS
+            ));
+        }
+        if self.temperature.display_points == 0
+            || self.temperature.display_points > MAX_TEMP_POINTS
+        {
+            return Err(format!(
+                "[temperature].display_points 必须在 1~{} 之间",
+                MAX_TEMP_POINTS
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// 保存配置：先写临时文件再原子替换，覆盖前把旧文件备份为 .bak。
+    /// 注意：参数名 `path` 是 config.toml 的完整路径。
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
+        let path = path.as_ref();
+        let content = toml::to_string_pretty(self)?;
+
+        // 先写同目录临时文件，避免写入中断导致配置损坏
+        let tmp_path = path.with_extension("toml.tmp");
+        std::fs::write(&tmp_path, content)?;
+
+        // 覆盖前备份旧配置，方便出错后手工恢复
+        if path.exists() {
+            let backup = path.with_extension("toml.bak");
+            std::fs::copy(path, &backup)?;
+        }
+
+        // Windows 下 rename 不能覆盖已存在文件，需先删除（旧文件已备份）
+        #[cfg(windows)]
+        if path.exists() {
+            std::fs::remove_file(path)?;
+        }
+        std::fs::rename(&tmp_path, path)?;
+
+        log::info!("Config saved: {}", path.display());
+        Ok(())
+    }
+}
+
+/// config.toml 完整路径：启动加载与界面保存共用，避免两处路径不一致
+pub fn config_path() -> PathBuf {
+    app_dir().join("config.toml")
 }
 
 /// 可执行文件所在目录。
@@ -290,5 +408,69 @@ pin_threshold = 1000
         let config: AppConfig = toml::from_str(&toml).unwrap();
         assert!(!config.basic.broadcast_search);
         assert_eq!(config.basic.device_ip, "192.168.1.100");
+    }
+
+    #[test]
+    fn test_default_config_passes_validation() {
+        AppConfig::default().validate().unwrap();
+    }
+
+    #[test]
+    fn test_validate_rejects_bad_ip() {
+        let mut config = AppConfig::default();
+        config.basic.local_ip = "192.168.1".to_string();
+        assert!(config.validate().is_err());
+
+        config.basic.local_ip = "192.168.1.10".to_string();
+        config.basic.broadcast_search = false;
+        config.basic.device_ip = String::new();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_bad_ports_and_chunk() {
+        let mut config = AppConfig::default();
+        config.basic.local_port = 0;
+        assert!(config.validate().is_err());
+
+        let mut config = AppConfig::default();
+        config.ssd.chunk_mb = 3;
+        assert!(config.validate().is_err());
+
+        let mut config = AppConfig::default();
+        config.temperature.save_points = 0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_save_and_reload() {
+        let dir = std::env::temp_dir().join(format!(
+            "uav_pc_config_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+
+        let mut config = AppConfig::default();
+        config.radar.display_name = "测试雷达".to_string();
+        config.save(&path).unwrap();
+
+        let loaded = AppConfig::load(&path).unwrap();
+        assert_eq!(loaded.radar.display_name, "测试雷达");
+
+        // 第二次保存应生成备份文件
+        config.radar.display_name = "测试雷达 2".to_string();
+        config.save(&path).unwrap();
+        assert!(path.with_extension("toml.bak").exists());
+        assert_eq!(
+            AppConfig::load(&path).unwrap().radar.display_name,
+            "测试雷达 2"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
