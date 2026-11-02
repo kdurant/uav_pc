@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../../composables/useToast";
 import { useTriggerHelp } from "../../composables/useTriggerHelp";
+import { useCaptureConfig } from "../../composables/useCaptureConfig";
 import CaptureParamsDialog from "../CaptureParamsDialog.vue";
 
 const props = defineProps<{
@@ -27,6 +28,31 @@ const secondLen = ref(400);
 const sumLevel = ref(0);
 const minLevel = ref(0);
 const settingInProgress = ref(false);
+
+// ===== 启动时从 config.toml [capture] 初始化参数 =====
+const { capture, load: loadCaptureConfig } = useCaptureConfig();
+
+/**
+ * 用配置文件初始化采集参数（仅填充界面，不自动下发）。
+ * 对应关系：sum_value → 和阈值，max_value → 值阈值；pin_threshold 暂未在界面展示。
+ */
+function applyCaptureConfig() {
+  const c = capture.value;
+  if (!c) return;
+  previewCoe.value = c.preview_coe;
+  waveLen.value = c.wave_len;
+  firstPos.value = c.first_pos;
+  firstLen.value = c.first_len;
+  secondPos.value = c.second_pos;
+  secondLen.value = c.second_len;
+  sumLevel.value = c.sum_value;
+  minLevel.value = c.max_value;
+}
+
+onMounted(async () => {
+  await loadCaptureConfig();
+  applyCaptureConfig();
+});
 
 async function setPreviewEnable() {
   if (!props.connected || !props.deviceIp) return;

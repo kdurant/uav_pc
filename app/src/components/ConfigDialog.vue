@@ -25,7 +25,7 @@ const LASER_TYPES = [
     { value: "laserConnet", label: "兼容别名（laserConnet）" },
 ];
 
-/** 采集参数：当前后端只实际使用 ref_channal，其余为预留/历史字段 */
+/** 采集参数：启动时会填入采集面板；pin_threshold 暂未在界面使用 */
 const CAPTURE_FIELDS: { key: keyof AppConfig["capture"]; label: string }[] = [
     { key: "preview_coe", label: "预览系数 preview_coe" },
     { key: "ref_channal", label: "参考通道 ref_channal（0~3）" },
@@ -35,9 +35,9 @@ const CAPTURE_FIELDS: { key: keyof AppConfig["capture"]; label: string }[] = [
     { key: "first_len", label: "第一段长度 first_len" },
     { key: "second_pos", label: "第二段起点 second_pos" },
     { key: "second_len", label: "第二段长度 second_len" },
-    { key: "sum_value", label: "累加值 sum_value" },
-    { key: "max_value", label: "最大值 max_value" },
-    { key: "pin_threshold", label: "PIN 阈值 pin_threshold" },
+    { key: "sum_value", label: "和阈值 sum_value" },
+    { key: "max_value", label: "值阈值 max_value" },
+    { key: "pin_threshold", label: "PIN 阈值 pin_threshold（暂未使用）" },
 ];
 
 /** 空配置：加载失败时保证表单结构完整，避免模板访问 undefined */
@@ -289,7 +289,7 @@ watch(
             <section class="cfg-section">
               <h4 class="cfg-title">采集参数</h4>
               <p class="cfg-hint">
-                当前版本后端仅使用 ref_channal，其余字段为预留参数，修改后可能不会生效。
+                采集面板启动时会用这里的参数初始化输入框（pin_threshold 暂未使用），修改后需重启上位机生效。
               </p>
               <div class="cfg-grid">
                 <label v-for="field in CAPTURE_FIELDS" :key="field.key" class="cfg-field">
