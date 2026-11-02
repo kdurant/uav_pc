@@ -392,24 +392,17 @@ handleSearch();
           </div>
         </div>
 
-        <!-- 调试菜单：离线回放 / 点云地形，需密码解锁 -->
+        <!-- 调试菜单：设置向导 / 离线回放 / 点云地形，需密码解锁 -->
         <DebugMenu
           :replay-active="replayActive"
           :cloud-active="cloudActive"
+          @wizard="showWizard = true"
           @replay="toggleReplay"
           @cloud="toggleCloud"
         />
       </div>
 
       <div class="toolbar-right">
-        <button class="tool-btn" title="打开设置向导，按步骤完成设备初始化" @click="showWizard = true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-            stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M15.5 8.5l-2 5-5 2 2-5 5-2z" />
-          </svg>
-          向导
-        </button>
         <button class="tool-btn" title="打开配置文件设置（保存后需重启生效）" @click="showConfig = true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">

@@ -17,7 +17,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-    (e: "replay" | "cloud"): void;
+    (e: "replay" | "cloud" | "wizard"): void;
 }>();
 
 const rootRef = ref<HTMLDivElement | null>(null);
@@ -79,7 +79,7 @@ function toggleMenu() {
 }
 
 /** 菜单项点击：先收起菜单，再执行对应操作 */
-function choose(action: "replay" | "cloud") {
+function choose(action: "replay" | "cloud" | "wizard") {
     menuOpen.value = false;
     emit(action);
 }
@@ -133,6 +133,18 @@ onUnmounted(() => {
 
     <!-- 下拉菜单 -->
     <div v-if="menuOpen" class="menu-panel">
+      <button
+        class="menu-item"
+        @click="choose('wizard')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M15.5 8.5l-2 5-5 2 2-5 5-2z" />
+        </svg>
+        <span>设置向导</span>
+      </button>
+
       <button
         class="menu-item"
         :class="{ active: props.replayActive }"
