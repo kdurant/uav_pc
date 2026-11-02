@@ -13,6 +13,9 @@ import ControlPanel from "./ControlPanel.vue";
 import TriggerModeDialog from "./TriggerModeDialog.vue";
 import ReplayBar from "./ReplayBar.vue";
 import CloudBar from "./CloudBar.vue";
+import DebugMenu from "./DebugMenu.vue";
+import ConfigDialog from "./ConfigDialog.vue";
+import SetupWizard from "./SetupWizard.vue";
 
 // three.js 体积较大，点云视图按需加载，避免拖慢首屏
 const PointCloudView = defineAsyncComponent(() => import("./PointCloudView.vue"));
@@ -31,7 +34,13 @@ const {
 
 onMounted(loadRadarConfig);
 
-const { status, stale: statusStale, start: startStatus, stop: stopStatus } = useSystemStatus();
+const {
+  status,
+  stale: statusStale,
+  isActive: statusActive,
+  start: startStatus,
+  stop: stopStatus,
+} = useSystemStatus();
 
 const toast = useToast();
 
@@ -78,6 +87,10 @@ function toggleCloud() {
 
 const connectionState = ref<ConnectionState>(ConnectionState.Disconnected);
 const showDeviceSelector = ref(false);
+// 配置设置弹窗
+const showConfig = ref(false);
+// 设置向导弹窗
+const showWizard = ref(false);
 const isConnecting = ref(false);
 
 // 通道可见性
@@ -365,45 +378,37 @@ handleSearch();
   <div class="layout">
     <!-- Top toolbar -->
     <header class="toolbar">
-      <div class="brand">
-        <div class="brand-mark">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-            stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2 13h4l2.4-6 3.1 12 3-9 2 3H22" />
-          </svg>
+      <div class="toolbar-left">
+        <div class="brand">
+          <div class="brand-mark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 13h4l2.4-6 3.1 12 3-9 2 3H22" />
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="app-title">{{ radarDisplayName }}上位机</span>
+          </div>
         </div>
-        <div class="brand-text">
-          <span class="app-title">{{ radarDisplayName }}上位机</span>
-        </div>
+
+        <!-- 调试菜单：设置向导 / 离线回放 / 点云地形，需密码解锁 -->
+        <DebugMenu
+          :replay-active="replayActive"
+          :cloud-active="cloudActive"
+          @wizard="showWizard = true"
+          @replay="toggleReplay"
+          @cloud="toggleCloud"
+        />
       </div>
 
       <div class="toolbar-right">
-        <button
-          class="tool-btn"
-          :class="{ active: replayActive }"
-          :title="replayActive ? '退出离线回放，恢复实时预览' : '按帧回放本地采集数据文件'"
-          @click="toggleReplay"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-            stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 5v14l9-7-9-7z" />
-            <path d="M14 5h2v14h-2z" />
-          </svg>
-          {{ replayActive ? "退出回放" : "离线回放" }}
-        </button>
-        <button
-          class="tool-btn"
-          :class="{ active: cloudActive }"
-          :title="cloudActive ? '退出点云模式' : '把采集数据生成水下地形点云 / DEM'"
-          @click="toggleCloud"
-        >
+        <button class="tool-btn" title="打开配置文件设置（保存后需重启生效）" @click="showConfig = true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" />
-            <path d="M4 7.5l8 4.5 8-4.5" />
-            <path d="M12 12v9" />
+            <circle cx="12" cy="12" r="3.2" />
+            <path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06A1.7 1.7 0 0015 19.4a1.7 1.7 0 00-1 .6 1.7 1.7 0 00-.4 1.1V21a2 2 0 11-4 0v-.09A1.7 1.7 0 009 19.4a1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-.6-1 1.7 1.7 0 00-1.1-.4H2.9a2 2 0 110-4h.09A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-.6 1.7 1.7 0 00.4-1.1V2.9a2 2 0 114 0v.09A1.7 1.7 0 0015 4.6a1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9a1.7 1.7 0 00.6 1 1.7 1.7 0 001.1.4h.09a2 2 0 110 4h-.09a1.7 1.7 0 00-1.1.4z" />
           </svg>
-          {{ cloudActive ? "退出点云" : "点云" }}
+          设置
         </button>
         <div class="conn-pill" :class="connectionClass">
           <span class="conn-dot"></span>
@@ -512,6 +517,20 @@ handleSearch();
       :min-level="status?.min_level"
     />
 
+    <!-- 配置文件设置 -->
+    <ConfigDialog v-model:visible="showConfig" />
+
+    <!-- 设置向导：连接 → 激光器 → 电机 → 增益 → 采集 → 存储 -->
+    <SetupWizard
+      v-model:visible="showWizard"
+      :connected="connectionState === ConnectionState.Connected"
+      :device-ip="selectedDevice?.ip"
+      :status="status"
+      :status-active="statusActive"
+      @search="handleSearch"
+      @toggle-status="handleToggleStatus"
+    />
+
   </div>
 </template>
 
@@ -585,10 +604,11 @@ handleSearch();
   gap: 10px;
 }
 
-.tool-btn.active {
-  border-color: var(--accent);
-  color: var(--accent-dim);
-  background: var(--accent-glow, #eff4ff);
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
 }
 
 .tool-btn {

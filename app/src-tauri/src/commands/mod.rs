@@ -192,6 +192,29 @@ pub fn get_radar_config(app: AppHandle) -> crate::config::RadarConfig {
     app.state::<AppConfig>().radar.clone()
 }
 
+/// 读取完整配置（供设置界面展示）
+#[tauri::command]
+pub fn get_app_config(app: AppHandle) -> AppConfig {
+    app.state::<AppConfig>().inner().clone()
+}
+
+/// config.toml 的实际路径，界面上展示给用户
+#[tauri::command]
+pub fn get_config_path() -> String {
+    crate::config::config_path().display().to_string()
+}
+
+/// 保存配置到 config.toml：后端校验通过后原子写入，重启上位机后生效。
+/// 不修改内存中的配置，避免出现"部分生效、部分未生效"的状态。
+#[tauri::command]
+pub fn save_app_config(config: AppConfig) -> Result<(), String> {
+    config.validate()?;
+    let path = crate::config::config_path();
+    config
+        .save(&path)
+        .map_err(|e| format!("保存配置失败（{}）: {}", path.display(), e))
+}
+
 /// 发现局域网内设备：发送 0x0100 广播，300ms 内收集响应设备；
 /// `[basic].broadcast_search = false` 时不广播，直接返回 `device_ip`
 #[tauri::command]

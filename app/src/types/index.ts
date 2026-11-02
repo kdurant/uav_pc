@@ -104,11 +104,47 @@ export interface RadarConfig {
     laser_info: string;
 }
 
-/** 应用配置 */
+/** 应用配置（对应 Rust AppConfig，字段与 config.toml 一一对应） */
 export interface AppConfig {
     basic: {
+        /** 本机绑定 IP */
         local_ip: string;
+        /** 本机绑定端口 */
         local_port: number;
+        /** 设备远端端口 */
+        remote_port: number;
+        /** 是否通过 UDP 广播搜索设备 */
+        broadcast_search: boolean;
+        /** broadcast_search = false 时使用的设备 IP */
+        device_ip: string;
+    };
+    radar: RadarConfig;
+    capture: {
+        preview_coe: number;
+        ref_channal: number;
+        save_channal: number;
+        wave_len: number;
+        first_pos: number;
+        first_len: number;
+        second_pos: number;
+        second_len: number;
+        sum_value: number;
+        max_value: number;
+        pin_threshold: number;
+    };
+    gps: {
+        /** 设备端 GPS 数据目录 */
+        dir: string;
+    };
+    ssd: {
+        /** TCP 下载分块大小（MB），仅支持 1/2/4 */
+        chunk_mb: number;
+    };
+    temperature: {
+        /** 历史文件最多保存点数 */
+        save_points: number;
+        /** 曲线最多显示点数 */
+        display_points: number;
     };
 }
 

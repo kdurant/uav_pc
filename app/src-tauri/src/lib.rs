@@ -132,7 +132,7 @@ async fn background_udp_listener(
 pub fn run() {
     env_logger::init();
 
-    let config_path = config::app_dir().join("config.toml");
+    let config_path = config::config_path();
     let app_config = config::AppConfig::load_or_create(&config_path)
         .expect("Failed to load or create config.toml");
     log::info!("Using config file: {}", config_path.display());
@@ -179,6 +179,9 @@ pub fn run() {
             commands::save_temperature_history,
             commands::get_temperature_config,
             commands::get_radar_config,
+            commands::get_app_config,
+            commands::get_config_path,
+            commands::save_app_config,
             commands::start_preview,
             commands::register_preview_channel,
             commands::unregister_preview_channel,

@@ -2,20 +2,29 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import { useChart } from "../composables/useChart";
 
+// 注意：defineProps 默认值会提升到 setup 之外，不能引用本地声明的变量，
+// 因此通道名称默认值直接内联（CH0 APD / CH1 低增益 / CH2 高增益 / CH3 PIN主波）
 const props = withDefaults(
   defineProps<{
     channelCount?: number;
     maxPoints?: number;
     lineColors?: string[];
     channelVisible?: boolean[];
+    channelNames?: string[];
   }>(),
   {
     channelCount: 4,
     maxPoints: 4000,
     lineColors: () => ["#2f6fed", "#ef4444", "#f59e0b", "#10b981"],
     channelVisible: () => [true, true, true, true],
+    channelNames: () => ["APD（AD3)", "低增益(AD1)", "高增益(AD0)", "PIN主波"],
   }
 );
+
+/** 获取通道显示名，缺省回退为 CHx */
+function channelLabel(ch: number): string {
+  return props.channelNames[ch] || `CH${ch}`;
+}
 
 const emit = defineEmits<{
   (e: "update:channelVisible", value: boolean[]): void;
@@ -44,6 +53,52 @@ const useManualRangeX = ref(false);
 const showDots = ref(false);
 const showGrid = ref(true);
 const autoRefresh = ref(true);
+
+// ===== 空闲基线对齐 =====
+// 开启时把每个通道当前的空闲电平作为自身基准，显示时减去该基准，
+// 让 4 个通道统一落在 0 基线上，便于直接对比信号。
+// 基准在开启瞬间锁定（使用中位数，避免尖峰噪声影响）；若某个通道当时没有数据，
+// 会在它首次出现数据时单独补做校准，不会影响已经对齐的通道。
+const baselineAlign = ref(false);
+/** 各通道需要减去的基准值；undefined 表示该通道还没校准 */
+const baselineOffsets: number[] = [];
+
+/** 计算单个通道的中位数（忽略 NaN），空闲电平的稳健估计；无数据返回 null */
+function channelMedian(buf?: Float64Array): number | null {
+  if (!buf) return null;
+  const values: number[] = [];
+  for (let i = 0; i < buf.length; i++) {
+    const v = buf[i];
+    if (Number.isFinite(v)) values.push(v);
+  }
+  if (values.length === 0) return null;
+  values.sort((a, b) => a - b);
+  const mid = values.length >> 1;
+  return values.length % 2 === 1 ? values[mid] : (values[mid - 1] + values[mid]) / 2;
+}
+
+/** 为尚未校准的通道补做校准；已有基准的通道保持不变 */
+function calibrateBaseline(buffers: Float64Array[]) {
+  for (let ch = 0; ch < props.channelCount; ch++) {
+    if (baselineOffsets[ch] !== undefined) continue;
+    const median = channelMedian(buffers[ch]);
+    if (median !== null) baselineOffsets[ch] = median;
+  }
+}
+
+/** 通道当前的基线偏移：未开启对齐时恒为 0 */
+function channelOffset(ch: number): number {
+  return baselineAlign.value ? baselineOffsets[ch] ?? 0 : 0;
+}
+
+/** 开关切换：开启时立即用当前帧各通道中位数校准，关闭时清除全部基准 */
+function onBaselineToggle() {
+  baselineOffsets.length = 0;
+  if (baselineAlign.value) {
+    calibrateBaseline(lastRenderState.buffers);
+  }
+  chart.markDirty();
+}
 
 // 网格缓存（始终强制重绘以响应 showGrid 切换）
 let lastYMin = NaN;
@@ -330,6 +385,9 @@ function render(buffers: Float64Array[]) {
     if (!hasData) vppValues.value = [];
   }
 
+  // 基线对齐：为开启时还没有数据的通道补做校准（已校准的通道不受影响）
+  if (baselineAlign.value) calibrateBaseline(buffers);
+
   // 计算 Y 轴范围
   let yMin: number, yMax: number;
   if (useManualRangeY.value) {
@@ -343,8 +401,9 @@ function render(buffers: Float64Array[]) {
       const buf = buffers[ch];
       const end = Math.min(startIdx + visibleLen, buf.length);
       for (let i = startIdx; i < end; i++) {
-        const v = buf[i];
-        if (!Number.isFinite(v)) continue; // 空档（无数据）
+        const raw = buf[i];
+        if (!Number.isFinite(raw)) continue; // 空档（无数据）
+        const v = raw - channelOffset(ch);
         if (v < yMin) yMin = v;
         if (v > yMax) yMax = v;
       }
@@ -456,11 +515,12 @@ function render(buffers: Float64Array[]) {
 
     let firstPoint = true;
     for (let i = startIdx; i < startIdx + visibleLen && i < buf.length; i++) {
-      const v = buf[i];
-      if (!Number.isFinite(v)) {
+      const raw = buf[i];
+      if (!Number.isFinite(raw)) {
         firstPoint = true; // 空档：断开折线，下一段重新起笔
         continue;
       }
+      const v = raw - channelOffset(ch);
       const x = margin.left + ((i - startIdx) / totalDrawn) * plotW;
       const y = margin.top + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
 
@@ -480,23 +540,37 @@ function render(buffers: Float64Array[]) {
 
   ctx.restore();
 
-  // 通道图例（胶囊样式，位于绘图区上方的留白内）
+  // 通道图例（胶囊样式，右对齐到绘图区右上角）
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
+  ctx.font = `600 ${fontSize}px "Inter", "PingFang SC", sans-serif`;
   const legendY = 15;
-  let legendX = margin.left;
-  for (let ch = 0; ch < Math.min(buffers.length, 4); ch++) {
+  const legendCount = Math.min(buffers.length, 4);
+  const legendBoxH = 21;
+  const legendGap = 6;
+
+  // 先测量每个胶囊宽度，以便整体右对齐
+  const legendBoxW: number[] = [];
+  let legendTotalW = 0;
+  for (let ch = 0; ch < legendCount; ch++) {
+    const w = ctx.measureText(channelLabel(ch)).width + 30;
+    legendBoxW.push(w);
+    legendTotalW += w;
+  }
+  legendTotalW += legendGap * Math.max(0, legendCount - 1);
+
+  // 右对齐；画布过窄时回退到左边界，避免溢出
+  let legendX = Math.max(margin.left, margin.left + plotW - legendTotalW);
+  for (let ch = 0; ch < legendCount; ch++) {
     const visible = props.channelVisible[ch];
     const color = visible ? props.lineColors[ch] || "#2f6fed" : hiddenColor;
-    const label = `CH${ch}`;
-    ctx.font = `600 ${fontSize}px "Inter", "PingFang SC", sans-serif`;
-    const boxW = ctx.measureText(label).width + 30;
-    const boxH = 21;
+    const label = channelLabel(ch);
+    const boxW = legendBoxW[ch];
 
     // 胶囊底色
     ctx.fillStyle = visible ? withAlpha(props.lineColors[ch] || "#2f6fed", 0.09) : "rgba(147, 160, 180, 0.07)";
     ctx.beginPath();
-    ctx.roundRect(legendX, legendY - boxH / 2, boxW, boxH, 6);
+    ctx.roundRect(legendX, legendY - legendBoxH / 2, boxW, legendBoxH, 6);
     ctx.fill();
 
     // 色块
@@ -509,7 +583,7 @@ function render(buffers: Float64Array[]) {
     ctx.fillStyle = visible ? "#4a5568" : "#a3adbd";
     ctx.fillText(label, legendX + 23, legendY + 0.5);
 
-    legendX += boxW + 6;
+    legendX += boxW + legendGap;
   }
   ctx.textBaseline = "alphabetic";
 
@@ -575,8 +649,9 @@ function render(buffers: Float64Array[]) {
       const buf = buffers[ch];
       if (nearIdx < 0 || nearIdx >= buf.length) continue;
 
-      const val = buf[nearIdx];
-      if (!Number.isFinite(val)) continue; // 空档：无数据
+      const raw = buf[nearIdx];
+      if (!Number.isFinite(raw)) continue; // 空档：无数据
+      const val = raw - channelOffset(ch);
       const px = margin.left + ((nearIdx - startIdx) / Math.max(1, visibleLen - 1)) * plotW;
       const py = margin.top + plotH - ((val - yMin) / (yMax - yMin || 1)) * plotH;
 
@@ -591,7 +666,7 @@ function render(buffers: Float64Array[]) {
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      tipLines.push(`CH${ch} = ${val.toFixed(1)}`);
+      tipLines.push(`${channelLabel(ch)} = ${val.toFixed(1)}`);
       tipColors.push(color);
     }
 
@@ -726,7 +801,7 @@ onUnmounted(() => {
         :style="{ '--ch-color': props.lineColors[ch - 1] }"
       >
         <span class="vpp-dot"></span>
-        <span class="vpp-ch">CH{{ ch - 1 }}</span>
+        <span class="vpp-ch">{{ channelLabel(ch - 1) }}</span>
         <span class="vpp-val">{{ vppValues[ch - 1] ?? '--' }}</span>
       </span>
     </div>
@@ -757,7 +832,7 @@ onUnmounted(() => {
         >
           <input type="checkbox" :checked="props.channelVisible[ch - 1]" @change="toggleCh(ch - 1)" />
           <span class="ch-swatch"></span>
-          <span>CH{{ ch - 1 }}</span>
+          <span>{{ channelLabel(ch - 1) }}</span>
         </label>
       </div>
 
@@ -794,6 +869,14 @@ onUnmounted(() => {
         <label class="ch-chip plain">
           <input type="checkbox" v-model="showDots" @change="chart.markDirty()" />
           <span>圆点</span>
+        </label>
+        <label
+          class="ch-chip plain"
+          :class="{ aligned: baselineAlign }"
+          title="开启后把各通道空闲电平归零到同一基准；请在无信号时开启"
+        >
+          <input type="checkbox" v-model="baselineAlign" @change="onBaselineToggle" />
+          <span>基线对齐</span>
         </label>
         <label class="ch-chip plain" :class="{ paused: !autoRefresh }">
           <input type="checkbox" v-model="autoRefresh" @change="onRefreshToggle" />
@@ -1058,6 +1141,13 @@ canvas {
   color: var(--warning);
   background: var(--warning-soft);
   border-color: #f2dec2;
+}
+
+/* 基线对齐开启 */
+.ch-chip.aligned {
+  color: var(--accent-dim);
+  background: var(--accent-soft);
+  border-color: #c7d7fb;
 }
 
 /* 窄窗口：压缩工具条，隐藏操作提示 */
