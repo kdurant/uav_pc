@@ -15,6 +15,7 @@ import ReplayBar from "./ReplayBar.vue";
 import CloudBar from "./CloudBar.vue";
 import DebugMenu from "./DebugMenu.vue";
 import ConfigDialog from "./ConfigDialog.vue";
+import SetupWizard from "./SetupWizard.vue";
 
 // three.js 体积较大，点云视图按需加载，避免拖慢首屏
 const PointCloudView = defineAsyncComponent(() => import("./PointCloudView.vue"));
@@ -33,7 +34,13 @@ const {
 
 onMounted(loadRadarConfig);
 
-const { status, stale: statusStale, start: startStatus, stop: stopStatus } = useSystemStatus();
+const {
+  status,
+  stale: statusStale,
+  isActive: statusActive,
+  start: startStatus,
+  stop: stopStatus,
+} = useSystemStatus();
 
 const toast = useToast();
 
@@ -82,6 +89,8 @@ const connectionState = ref<ConnectionState>(ConnectionState.Disconnected);
 const showDeviceSelector = ref(false);
 // 配置设置弹窗
 const showConfig = ref(false);
+// 设置向导弹窗
+const showWizard = ref(false);
 const isConnecting = ref(false);
 
 // 通道可见性
@@ -393,6 +402,14 @@ handleSearch();
       </div>
 
       <div class="toolbar-right">
+        <button class="tool-btn" title="打开设置向导，按步骤完成设备初始化" @click="showWizard = true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M15.5 8.5l-2 5-5 2 2-5 5-2z" />
+          </svg>
+          向导
+        </button>
         <button class="tool-btn" title="打开配置文件设置（保存后需重启生效）" @click="showConfig = true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">
@@ -510,6 +527,17 @@ handleSearch();
 
     <!-- 配置文件设置 -->
     <ConfigDialog v-model:visible="showConfig" />
+
+    <!-- 设置向导：连接 → 激光器 → 电机 → 增益 → 采集 → 存储 -->
+    <SetupWizard
+      v-model:visible="showWizard"
+      :connected="connectionState === ConnectionState.Connected"
+      :device-ip="selectedDevice?.ip"
+      :status="status"
+      :status-active="statusActive"
+      @search="handleSearch"
+      @toggle-status="handleToggleStatus"
+    />
 
   </div>
 </template>
