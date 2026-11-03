@@ -583,6 +583,20 @@ pub async fn send_command(
     Ok(())
 }
 
+/// 设置预览波形刷新间隔（ms），由波形图下方控件调用
+#[tauri::command]
+pub fn set_preview_refresh_ms(ms: u64) -> Result<(), String> {
+    if !(crate::PREVIEW_REFRESH_MIN_MS..=crate::PREVIEW_REFRESH_MAX_MS).contains(&ms) {
+        return Err(format!(
+            "刷新间隔必须在 {}~{} ms 之间",
+            crate::PREVIEW_REFRESH_MIN_MS, crate::PREVIEW_REFRESH_MAX_MS
+        ));
+    }
+    crate::PREVIEW_REFRESH_MS.store(ms, std::sync::atomic::Ordering::Relaxed);
+    log::info!("Preview refresh interval set to {} ms", ms);
+    Ok(())
+}
+
 /// 设置信号采集模式（0x0f03）。
 ///
 /// PIN 触发（mode=2）时，先用 0x0321 下发 pin 通道触发阈值，

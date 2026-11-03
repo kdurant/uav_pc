@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { useChart } from "../composables/useChart";
+import type { TargetMeasurement } from "../utils/targetDistance";
 
 // 注意：defineProps 默认值会提升到 setup 之外，不能引用本地声明的变量，
 // 因此通道名称默认值直接内联（CH0 APD / CH1 低增益 / CH2 高增益 / CH3 PIN主波）
@@ -11,6 +13,8 @@ const props = withDefaults(
     lineColors?: string[];
     channelVisible?: boolean[];
     channelNames?: string[];
+    /** 目标距离测量结果（实时预览） */
+    distance?: TargetMeasurement | null;
   }>(),
   {
     channelCount: 4,
@@ -53,6 +57,28 @@ const useManualRangeX = ref(false);
 const showDots = ref(false);
 const showGrid = ref(true);
 const autoRefresh = ref(true);
+
+// 波形刷新间隔（ms）：控制后端预览帧推送频率，修改后立即生效
+const DEFAULT_REFRESH_MS = 50;
+const refreshMs = ref(DEFAULT_REFRESH_MS);
+
+async function applyRefreshMs() {
+  const raw = Math.round(Number(refreshMs.value));
+  const ms = Math.min(
+    2000,
+    Math.max(10, Number.isFinite(raw) ? raw : DEFAULT_REFRESH_MS)
+  );
+  refreshMs.value = ms;
+  try {
+    await invoke("set_preview_refresh_ms", { ms });
+  } catch (e) {
+    console.error("set_preview_refresh_ms failed:", e);
+  }
+}
+
+onMounted(() => {
+  void applyRefreshMs();
+});
 
 // ===== 空闲基线对齐 =====
 // 开启时把每个通道当前的空闲电平作为自身基准，显示时减去该基准，
@@ -804,6 +830,19 @@ onUnmounted(() => {
         <span class="vpp-ch">{{ channelLabel(ch - 1) }}</span>
         <span class="vpp-val">{{ vppValues[ch - 1] ?? '--' }}</span>
       </span>
+
+      <span v-if="distance" class="distance-readout">
+        <span
+          class="distance-title"
+          title="PIN 主波第一段峰值 → 高增益通道第二段峰值，1 样点 = 1 ns，往返距离 0.15 m/ns"
+        >目标距离</span>
+        <span class="distance-val">
+          {{ distance.distanceM != null ? distance.distanceM.toFixed(2) + ' m' : '--' }}
+        </span>
+        <span class="distance-detail">
+          起点 {{ distance.startNs ?? '--' }} ns · 终点 {{ distance.endNs ?? '--' }} ns
+        </span>
+      </span>
     </div>
 
     <div class="canvas-wrap">
@@ -884,6 +923,23 @@ onUnmounted(() => {
         </label>
       </div>
 
+      <span class="bar-divider"></span>
+
+      <!-- 波形刷新间隔 -->
+      <div class="bar-group" title="波形数据刷新间隔，修改后立即生效">
+        <span class="bar-label">刷新</span>
+        <input
+          type="number"
+          class="range-inp refresh-inp"
+          v-model.number="refreshMs"
+          min="10"
+          max="2000"
+          step="10"
+          @change="applyRefreshMs"
+        />
+        <span class="bar-unit">ms</span>
+      </div>
+
       <span class="zoom-hint">滚轮缩放 X · Ctrl+滚轮缩放 Y · 框选放大 · 双击重置</span>
     </div>
   </div>
@@ -961,6 +1017,38 @@ onUnmounted(() => {
   font-size: 11.5px;
   font-weight: 600;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.distance-readout {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 14px;
+  border-left: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.distance-title {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.distance-val {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f766e;
+  font-variant-numeric: tabular-nums;
+}
+
+.distance-detail {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1057,6 +1145,15 @@ canvas {
   letter-spacing: 0.06em;
 }
 
+.bar-unit {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.refresh-inp {
+  width: 58px;
+}
+
 .bar-tilde {
   color: var(--text-tertiary);
   font-size: 11px;
@@ -1065,8 +1162,7 @@ canvas {
 .range-inp {
   width: 62px;
   height: 26px;
-  padding: 0 7px;
-  font-size: 11.5px;
+  padding: 0 7px;  font-size: 11.5px;
   border-radius: var(--radius-xs);
   background: #fff;
 }

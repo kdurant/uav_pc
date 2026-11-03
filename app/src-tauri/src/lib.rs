@@ -1,4 +1,5 @@
 use commands::NetworkState;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::Emitter;
@@ -18,11 +19,12 @@ mod protocol;
 mod replay;
 mod status;
 
-/// 预览数据推送到前端的最大频率（30Hz）。
-/// Tauri v2 的事件通过 eval 注入 JS，每帧都要序列化 + 编译执行，
-/// 波形帧数据量大，按设备原始上传频率（可达 100Hz）推送会占满 WebKit 主线程，
-/// 导致按钮点击等交互明显变慢；画面只需保留最新一帧，因此这里限制推送频率。
-const PREVIEW_EMIT_INTERVAL: Duration = Duration::from_millis(33);
+/// 预览推送间隔的允许范围（ms）
+pub(crate) const PREVIEW_REFRESH_MIN_MS: u64 = 10;
+pub(crate) const PREVIEW_REFRESH_MAX_MS: u64 = 2000;
+
+/// 预览波形推送间隔（ms），由界面实时设置，默认 50ms
+pub(crate) static PREVIEW_REFRESH_MS: AtomicU64 = AtomicU64::new(50);
 
 /// 后台 UDP 监听任务：唯一 socket 消费者，将所有帧分发到 broadcast channel
 async fn background_udp_listener(
@@ -86,7 +88,12 @@ async fn background_udp_listener(
                     if from_connected {
                         // 限频：只解析并推送最新一帧，丢弃间隔内的旧帧
                         let due = last_preview_emit
-                            .map(|t| t.elapsed() >= PREVIEW_EMIT_INTERVAL)
+                            .map(|t| {
+                                let ms = PREVIEW_REFRESH_MS
+                                    .load(Ordering::Relaxed)
+                                    .clamp(PREVIEW_REFRESH_MIN_MS, PREVIEW_REFRESH_MAX_MS);
+                                t.elapsed() >= Duration::from_millis(ms)
+                            })
                             .unwrap_or(true);
                         if due {
                             last_preview_emit = Some(Instant::now());
@@ -173,6 +180,7 @@ pub fn run() {
             commands::send_ref_channel,
             commands::send_command,
             commands::set_trg_mode,
+            commands::set_preview_refresh_ms,
             commands::laser_command,
             commands::motor_command,
             commands::passthrough_command,

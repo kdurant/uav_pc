@@ -22,6 +22,8 @@ import PassthroughDialog from "./PassthroughDialog.vue";
 const PointCloudView = defineAsyncComponent(() => import("./PointCloudView.vue"));
 import { useReplay } from "../composables/useReplay";
 import { usePointCloud } from "../composables/usePointCloud";
+import { measureTargetDistance } from "../utils/targetDistance";
+import type { TargetMeasurement } from "../utils/targetDistance";
 import { ConnectionState } from "../types";
 import type { PreviewFrame } from "../types";
 
@@ -107,6 +109,9 @@ const previewSubTime = ref<number | null>(null);
 let lastPreviewSubTimeUpdate = 0;
 const PREVIEW_SUB_TIME_INTERVAL_MS = 100;
 
+/** 目标距离：PIN 主波第一段峰值 → 高增益第二段峰值 */
+const targetDistance = ref<TargetMeasurement | null>(null);
+
 /** 清空预览细分时间（断开/停止采集时避免显示旧值） */
 function clearPreviewSubTime() {
   previewSubTime.value = null;
@@ -118,6 +123,7 @@ function pushPreviewFrame(series: number[][], frame: PreviewFrame) {
   // 回放 / 点云模式与实时预览互斥，实时帧不上屏，避免两路数据互相覆盖
   if (offlineMode.value) return;
 
+  targetDistance.value = measureTargetDistance(frame);
   chartRef.value?.setFrame(series);
 
   // 细分时间不需要跟 30Hz 帧率刷新，限频到 10Hz，避免状态面板频繁重绘
@@ -141,6 +147,7 @@ watch(offlineMode, (on) => {
   if (on) {
     previewOutput.stop();
     clearPreviewSubTime();
+    targetDistance.value = null;
   } else if (connectionState.value === ConnectionState.Connected) {
     previewOutput.start();
   }
@@ -485,6 +492,7 @@ handleSearch();
             :channel-count="4"
             :max-points="4000"
             :channel-visible="channelVisible"
+            :distance="targetDistance"
             @update:channel-visible="channelVisible = $event"
           />
         </div>
