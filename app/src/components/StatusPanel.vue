@@ -21,6 +21,15 @@ const { open: openTriggerHelp } = useTriggerHelp();
 /** 方便模板安全访问 */
 const s = computed(() => props.status);
 
+/** 采集频率偏离激光器设定频率 ±40% 时告警 */
+const trgFreqOutOfRange = computed(() => {
+  const st = props.status;
+  if (!st || st.laser_freq <= 0) return false;
+  const freq = st.trg_cycle;
+  if (!Number.isFinite(freq)) return false;
+  return freq < st.laser_freq * 0.6 || freq > st.laser_freq * 1.4;
+});
+
 /** GPS 区域数据来源：回放优先，否则用设备实时状态 */
 const gpsView = computed(() => {
   const o = props.gpsOverride;
@@ -335,8 +344,10 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
           <span class="metric-value">{{ fmtMotorSpeed(s?.motor_speed) }}<i>RPM</i></span>
         </div>
         <div class="metric">
-          <span class="metric-label">触发频率</span>
-          <span class="metric-value">{{ fmt(s?.trg_cycle, 1) }}<i>Hz</i></span>
+          <span class="metric-label">采集频率</span>
+          <span class="metric-value" :class="{ 'metric-alarm': trgFreqOutOfRange }">
+            {{ fmt(s?.trg_cycle, 1) }}<i>Hz</i>
+          </span>
         </div>
         <div class="metric">
           <span class="metric-label">PPS 频率</span>
@@ -367,7 +378,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
           </span>
         </div>
         <div class="status-row">
-          <span class="label">激光器出光频率</span>
+          <span class="label">激光器设定频率</span>
           <span class="value mono">{{ s ? s.laser_freq + " Hz" : "-" }}</span>
         </div>
       </div>
@@ -689,6 +700,10 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+.metric-value.metric-alarm {
+  color: #dc2626;
 }
 
 .metric-value i {
