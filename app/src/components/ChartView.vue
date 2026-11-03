@@ -334,17 +334,47 @@ function onRefreshToggle() {
 function onWheel(e: WheelEvent) {
   e.preventDefault();
   if (e.ctrlKey || e.metaKey) {
-    const delta = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-    zoomFactor.value = Math.max(0.1, Math.min(50, zoomFactor.value * delta));
-  } else if (frameMode.value) {
-    // 位置对齐模式：滚轮按采样点位置缩放 X（写入手动范围）
-    const { startIdx, visibleLen, xOffset } = lastRenderState;
-    if (visibleLen > 1) {
-      const center = xOffset + startIdx + (visibleLen - 1) / 2;
+    // Y 轴缩放：以鼠标所在纵坐标为锚点写入手动范围
+    const { yMin, yMax, margin, plotH } = lastRenderState;
+    if (plotH > 0 && yMax > yMin) {
+      const rect = canvasRef.value?.getBoundingClientRect();
+      const mouseY = rect ? e.clientY - rect.top : margin.top + plotH / 2;
+      const ratio = Math.min(1, Math.max(0, (mouseY - margin.top) / plotH));
+      // 画布上方对应 yMax，下方对应 yMin
+      const anchor = yMax - ratio * (yMax - yMin);
       const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-      const half = Math.max(1, ((visibleLen - 1) / 2) * factor);
-      xStartManual.value = Math.max(0, Math.round(center - half));
-      xEndManual.value = Math.min(frameAxisEnd.value, Math.round(center + half));
+      const newRange = (yMax - yMin) * factor;
+
+      yMaxManual.value = anchor + ratio * newRange;
+      yMinManual.value = anchor - (1 - ratio) * newRange;
+      useManualRangeY.value = true;
+    }
+  } else if (frameMode.value) {
+    // 位置对齐模式：滚轮按采样点位置缩放 X，并以鼠标所在位置为锚点
+    const { startIdx, visibleLen, xOffset, margin, plotW } = lastRenderState;
+    if (visibleLen > 1 && plotW > 0) {
+      const rect = canvasRef.value?.getBoundingClientRect();
+      const mouseX = rect ? e.clientX - rect.left : margin.left + plotW / 2;
+      const ratio = Math.min(1, Math.max(0, (mouseX - margin.left) / plotW));
+      const anchor = xOffset + startIdx + ratio * (visibleLen - 1);
+
+      const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+      const newLen = Math.max(2, (visibleLen - 1) * factor + 1);
+      let newStart = anchor - ratio * (newLen - 1);
+      let newEnd = newStart + (newLen - 1);
+
+      // 触边时保持缩放后的窗口整体平移，避免锚点跑出数据范围
+      if (newStart < xOffset) {
+        newEnd += xOffset - newStart;
+        newStart = xOffset;
+      }
+      if (newEnd > frameAxisEnd.value) {
+        newStart -= newEnd - frameAxisEnd.value;
+        newEnd = frameAxisEnd.value;
+      }
+
+      xStartManual.value = Math.max(xOffset, Math.round(newStart));
+      xEndManual.value = Math.min(frameAxisEnd.value, Math.round(newEnd));
       useManualRangeX.value = true;
     }
   } else if (e.shiftKey) {
