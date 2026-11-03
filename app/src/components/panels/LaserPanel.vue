@@ -100,29 +100,18 @@ async function setLaserFreq() {
   await laserAction("freq", Math.trunc(laserFreq.value));
 }
 
-/** 电源开关：打开后立即重设电流（激光器关闭会把内部电流清零） */
+/** 电源开关：5kHz 激光器只下发开光/关光，不再自动设置电流 */
 async function toggleLaser() {
   const target = laserEnabled.value;
   if (target) {
-    if (laserType.value === "laser_5kHz") {
-      // 5kHz 激光器先设置 LD 预置电流，再一键开光
-      const currentOk = await laserAction("current", Math.trunc(laserCurrent.value));
-      if (!currentOk) {
-        laserEnabled.value = false;
-        return;
-      }
-      const opened = await laserAction("open");
-      if (!opened) {
-        laserEnabled.value = false;
-      }
-      return;
-    }
     const opened = await laserAction("open");
     if (!opened) {
       laserEnabled.value = false;
       return;
     }
-    await laserAction("current", Math.trunc(laserCurrent.value));
+    if (laserType.value !== "laser_5kHz") {
+      await laserAction("current", Math.trunc(laserCurrent.value));
+    }
   } else {
     const closed = await laserAction("close");
     if (!closed) laserEnabled.value = true;
@@ -333,26 +322,11 @@ const laserStatusItems = computed(() => {
             <button class="set-btn" :disabled="laserBusy || laserUnavailable" @click="setLaserFreq">设置</button>
           </div>
         </div>
-        <div class="field">
+        <div v-if="laserType !== 'laser_5kHz'" class="field">
           <span class="field-label">电流 (mA)</span>
           <div class="field-inline">
             <input type="number" v-model.number="laserCurrent" min="0" max="6000" :disabled="laserBusy || laserUnavailable" />
             <button class="set-btn" :disabled="laserBusy || laserUnavailable" @click="setLaserCurrent">设置</button>
-          </div>
-        </div>
-        <div v-if="laserType === 'laser_5kHz'" class="field">
-          <span class="field-label">脉宽 (µs)</span>
-          <div class="field-inline">
-            <input
-              type="number"
-              v-model.number="laserPulseWidth"
-              min="50"
-              max="80"
-              :disabled="laserBusy || laserUnavailable"
-            />
-            <button class="set-btn" :disabled="laserBusy || laserUnavailable" @click="setLaserPulseWidth">
-              设置
-            </button>
           </div>
         </div>
       </div>

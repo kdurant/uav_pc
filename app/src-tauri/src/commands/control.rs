@@ -82,8 +82,8 @@ pub async fn laser_command(
         }
         "current" => {
             let current = value.ok_or("缺少电流值（mA）")?;
-            if current > 6000 {
-                return Err("激光器电流超出范围（0~6000 mA）".into());
+            if current > 8000 {
+                return Err("激光器电流超出范围（0~8000 mA）".into());
             }
             let resp = request(
                 &app,
@@ -168,8 +168,8 @@ async fn laser_5khz_command(
         }
         "current" => {
             let ma = value.ok_or("缺少电流值（mA）")?;
-            if ma > 6000 {
-                return Err("5kHz 激光器电流范围为 0~6000 mA".into());
+            if ma > 8000 {
+                return Err("5kHz 激光器电流范围为 0~8000 mA".into());
             }
             (laser_5khz::build_current_ma(ma), false)
         }

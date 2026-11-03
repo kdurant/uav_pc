@@ -418,6 +418,18 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
           <span class="label">第二段</span>
           <span class="value mono">pos {{ s?.second_pos ?? "-" }} · len {{ s?.second_len ?? "-" }}</span>
         </div>
+        <div class="status-row">
+          <span class="label">和阈值</span>
+          <span class="value mono">{{ s?.sum_level ?? "-" }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">值阈值</span>
+          <span class="value mono">{{ s?.min_level ?? "-" }}</span>
+        </div>
+        <div class="status-row">
+          <span class="label">PIN 阈值</span>
+          <span class="value mono">{{ s?.pin_threshold ?? "-" }}</span>
+        </div>
       </div>
     </section>
 
