@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../../composables/useToast";
 import { useTriggerHelp } from "../../composables/useTriggerHelp";
@@ -9,6 +9,8 @@ import CaptureParamsDialog from "../CaptureParamsDialog.vue";
 const props = defineProps<{
   connected: boolean;
   deviceIp?: string;
+  /** 设备状态中的信号采集模式（0 内触发 / 1 外触发 / 2 PIN 触发） */
+  deviceMode?: number;
 }>();
 
 const toast = useToast();
@@ -130,6 +132,22 @@ const trigModes = [
   { value: 1, label: "外触发" },
   { value: 2, label: "PIN触发" },
 ];
+
+/** 设备状态更新后同步界面选项；仅在程序赋值时生效，不会触发下发 */
+watch(
+  () => props.deviceMode,
+  (mode) => {
+    if (
+      mode !== undefined &&
+      Number.isInteger(mode) &&
+      mode >= 0 &&
+      mode <= 2
+    ) {
+      trgMode.value = mode;
+    }
+  },
+  { immediate: true }
+);
 
 async function setTrgMode() {
   if (!props.connected || !props.deviceIp) return;

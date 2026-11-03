@@ -77,6 +77,7 @@ function selectTab(key: string) {
       v-show="activeTab === 'capture'"
       :connected="connected"
       :device-ip="deviceIp"
+      :device-mode="status ? Number(status.trg_mode) : undefined"
     />
     <StoragePanel
       v-show="activeTab === 'storage'"
