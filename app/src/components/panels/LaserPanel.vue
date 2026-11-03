@@ -37,10 +37,12 @@ const LASER_ACTION_LABELS: Record<string, string> = {
 const laserFreq = ref(20000);
 const laserEnabled = ref(false);
 const laserMode = ref(1); // 0 内触发，1 外触发
-const laserCurrent = ref(1000);
+const laserCurrent = ref(4300);
 const laserPulseWidth = ref(60);
 const laserStatus = ref<LaserStatus | null>(null);
 const laserBusy = ref(false);
+/** 最近一次开光/关光操作时间，用于抑制旧状态回写使能开关 */
+let lastLaserToggleAt = 0;
 
 const laserFreqMax = computed(() =>
   laserType.value === "laser_5kHz" ? 5000 : 100000
@@ -102,6 +104,7 @@ async function setLaserFreq() {
 
 /** 电源开关：5kHz 激光器只下发开光/关光，不再自动设置电流 */
 async function toggleLaser() {
+  lastLaserToggleAt = Date.now();
   const target = laserEnabled.value;
   if (target) {
     const opened = await laserAction("open");
@@ -143,10 +146,14 @@ async function queryLaserStatus(quiet = false): Promise<boolean> {
 
   const s = laserStatus.value;
 
-  // 轮询只刷新状态表格，不用设备读数覆盖“激光使能”开关，
-  // 避免激光器响应延迟时开关被短暂改回。手动查询才回填控制项。
-  if (!quiet) {
+  // 查询到有效状态后同步“激光使能”开关。刚操作开光/关光后的短时间内
+  // 不覆盖，避免设备状态尚未更新时开关被旧读数短暂改回。
+  if (!quiet || Date.now() - lastLaserToggleAt > 2000) {
     laserEnabled.value = s.status !== 0;
+  }
+
+  // 轮询不回填输入框，避免覆盖用户正在编辑的设定值；手动查询才回填。
+  if (!quiet) {
     if (s.status_flags != null) {
       laserMode.value = s.status_flags & 0x02 ? 1 : 0;
     }
@@ -322,10 +329,10 @@ const laserStatusItems = computed(() => {
             <button class="set-btn" :disabled="laserBusy || laserUnavailable" @click="setLaserFreq">设置</button>
           </div>
         </div>
-        <div v-if="laserType !== 'laser_5kHz'" class="field">
+        <div class="field">
           <span class="field-label">电流 (mA)</span>
           <div class="field-inline">
-            <input type="number" v-model.number="laserCurrent" min="0" max="6000" :disabled="laserBusy || laserUnavailable" />
+            <input type="number" v-model.number="laserCurrent" min="0" max="8000" :disabled="laserBusy || laserUnavailable" />
             <button class="set-btn" :disabled="laserBusy || laserUnavailable" @click="setLaserCurrent">设置</button>
           </div>
         </div>
