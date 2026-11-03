@@ -14,6 +14,8 @@ const toast = useToast();
 /** 命令动作 → 中文提示名，用于失败通知 */
 const MOTOR_ACTION_LABELS: Record<string, string> = {
   init: "初始化",
+  run: "启动",
+  stop: "停止",
   move_to: "移动到目标位置",
   home: "开始回零",
   home_stop: "停止回零",
@@ -23,6 +25,7 @@ const MOTOR_ACTION_LABELS: Record<string, string> = {
 // ===== 电机控制（0x0f00 透传） =====
 const motorBusy = ref(false);
 const motorState = ref<MotorState | null>(null);
+const motorSpeed = ref(100); // r/s
 const motorTargetPos = ref(0);
 /** 回零方法固定使用驱动器默认配置 */
 const MOTOR_HOME_METHOD = 34;
@@ -52,6 +55,14 @@ async function motorAction(action: string, value?: number): Promise<boolean> {
 
 async function initMotor() {
   await motorAction("init");
+}
+
+async function runMotor() {
+  await motorAction("run", Math.trunc(motorSpeed.value));
+}
+
+async function stopMotor() {
+  await motorAction("stop");
 }
 
 async function moveMotor() {
@@ -106,6 +117,20 @@ watch(
         {{ motorBusy ? "执行中..." : "初始化驱动器" }}
       </button>
       <p class="hint">初始化依次下发故障复位、关机、暂停与速度模式参数。</p>
+    </section>
+
+    <section class="ctrl-group">
+      <h4 class="group-title">速度模式</h4>
+      <div class="field-list">
+        <label class="field">
+          <span class="field-label">目标转速 (r/s)</span>
+          <input type="number" v-model.number="motorSpeed" min="0" max="3571" />
+        </label>
+      </div>
+      <div class="btn-row">
+        <button class="accent" :disabled="motorBusy" @click="runMotor">运行</button>
+        <button :disabled="motorBusy" @click="stopMotor">停止</button>
+      </div>
     </section>
 
     <section class="ctrl-group">
