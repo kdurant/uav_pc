@@ -194,6 +194,8 @@ pub fn run() {
             commands::list_sd_files,
             commands::download_sd_file,
             commands::cancel_sd_download,
+            commands::delete_sd_file,
+            commands::delete_all_gps_files,
             commands::open_replay_file,
             commands::read_replay_frame,
             commands::close_replay_file,

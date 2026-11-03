@@ -26,6 +26,8 @@ const props = defineProps<{
     downloadError?: string;
     /** 下载完成提示 */
     downloadMessage?: string;
+    /** 正在删除文件（GPS） */
+    deleting?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -33,6 +35,8 @@ const emit = defineEmits<{
     (e: "refresh"): void;
     (e: "download", file: DrawerFile): void;
     (e: "cancel-download"): void;
+    (e: "delete", file: DrawerFile): void;
+    (e: "delete-all"): void;
 }>();
 
 /** 字节数格式化为易读单位 */
@@ -184,13 +188,23 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                                             <td class="col-time">{{ formatMtime(f.mtime) }}</td>
                                         </template>
                                         <td class="col-action">
-                                            <button
-                                                class="row-btn"
-                                                :disabled="!canDownload || !!download || (mode === 'ssd' && (f.end ?? 0) <= (f.start ?? 0))"
-                                                @click="emit('download', f)"
-                                            >
-                                                下载
-                                            </button>
+                                            <div class="row-actions">
+                                                <button
+                                                    class="row-btn"
+                                                    :disabled="!canDownload || !!download || !!deleting || (mode === 'ssd' && (f.end ?? 0) <= (f.start ?? 0))"
+                                                    @click="emit('download', f)"
+                                                >
+                                                    下载
+                                                </button>
+                                                <button
+                                                    v-if="mode === 'gps'"
+                                                    class="row-btn danger"
+                                                    :disabled="!!download || !!deleting"
+                                                    @click="emit('delete', f)"
+                                                >
+                                                    删除
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 </tbody>
@@ -204,7 +218,15 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                             <template v-else>路径：/run/media/mmcblk1p1/（可在 config.toml [gps].dir 修改）</template>
                         </span>
                         <div class="foot-actions">
-                            <button :disabled="loading || !!download" @click="emit('refresh')">重新检索</button>
+                            <button
+                                v-if="mode === 'gps' && files.length"
+                                class="danger-btn"
+                                :disabled="loading || !!download || !!deleting"
+                                @click="emit('delete-all')"
+                            >
+                                {{ deleting ? "删除中..." : "删除全部" }}
+                            </button>
+                            <button :disabled="loading || !!download || !!deleting" @click="emit('refresh')">重新检索</button>
                             <button class="accent" @click="emit('close')">关闭</button>
                         </div>
                     </footer>
@@ -371,7 +393,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 }
 
 .file-table .col-action {
-    width: 72px;
+    width: 132px;
     text-align: right;
 }
 
@@ -395,6 +417,33 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 .row-btn:hover:not(:disabled) {
     background: var(--accent-soft);
     border-color: #bcd0f8;
+}
+
+.row-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.row-btn.danger {
+    color: #b42318;
+    border-color: #f1c9c5;
+}
+
+.row-btn.danger:hover:not(:disabled) {
+    background: #fef3f2;
+    border-color: #e9a9a3;
+}
+
+.danger-btn {
+    color: #b42318;
+    border-color: #f1c9c5;
+    background: #fff;
+}
+
+.danger-btn:hover:not(:disabled) {
+    background: #fef3f2;
+    border-color: #e9a9a3;
 }
 
 .row-btn:disabled {

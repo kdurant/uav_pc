@@ -104,6 +104,83 @@ pub fn list_sd_files(device_ip: &str, dir: &str) -> Result<Vec<SdFile>, String> 
     Ok(files)
 }
 
+/// SD 卡删除结果
+#[derive(Debug, Clone, Serialize)]
+pub struct SdDeleteResult {
+    /// 成功删除的文件数
+    pub deleted: usize,
+    /// 删除失败的文件（文件名: 原因）
+    pub failed: Vec<String>,
+}
+
+/// 设备写入的 GPS 数据文件名：`pos_<时间>.bin`
+pub fn is_gps_filename(name: &str) -> bool {
+    name.starts_with("pos_") && name.ends_with(".bin")
+}
+
+/// 删除 SD 卡上的单个文件
+pub fn delete_sd_file(device_ip: &str, dir: &str, filename: &str) -> Result<(), String> {
+    // 只允许删除 GPS 目录内的单个文件名，拒绝路径穿越
+    if filename.is_empty()
+        || filename == "."
+        || filename == ".."
+        || filename.contains('/')
+        || filename.contains('\\')
+    {
+        return Err(format!("非法文件名: {}", filename));
+    }
+
+    let sess = connect(device_ip)?;
+    let sftp = sess
+        .sftp()
+        .map_err(|e| map_ssh_error("启动 SFTP 失败", e))?;
+    let dir_path = Path::new(dir);
+    sftp.stat(dir_path)
+        .map_err(|_| SD_MISSING_MSG.to_string())?;
+
+    sftp.unlink(&dir_path.join(filename))
+        .map_err(|e| map_ssh_error("删除 SD 卡文件失败", e))
+}
+
+/// 删除 SD 卡上所有 GPS 数据文件（只匹配 `pos_*.bin`）
+pub fn delete_all_gps_files(device_ip: &str, dir: &str) -> Result<SdDeleteResult, String> {
+    let sess = connect(device_ip)?;
+    let sftp = sess
+        .sftp()
+        .map_err(|e| map_ssh_error("启动 SFTP 失败", e))?;
+    let dir_path = Path::new(dir);
+    let dir_stat = sftp
+        .stat(dir_path)
+        .map_err(|_| SD_MISSING_MSG.to_string())?;
+    if !dir_stat.is_dir() {
+        return Err(format!("GPS 路径不是目录: {}", dir));
+    }
+
+    let entries = sftp
+        .readdir(dir_path)
+        .map_err(|e| map_ssh_error("读取 SD 卡目录失败", e))?;
+
+    let mut deleted = 0usize;
+    let mut failed = Vec::new();
+    for (path, stat) in entries {
+        if stat.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !is_gps_filename(name) {
+            continue;
+        }
+        match sftp.unlink(&path) {
+            Ok(()) => deleted += 1,
+            Err(e) => failed.push(format!("{}: {}", name, e)),
+        }
+    }
+
+    Ok(SdDeleteResult { deleted, failed })
+}
+
 /// 下载一个 SD 卡文件到本机。
 ///
 /// 不支持断点续传；取消/失败会删除 `.part` 临时文件。

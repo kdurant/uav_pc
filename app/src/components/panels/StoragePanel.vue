@@ -10,6 +10,7 @@ import type {
   SystemStatus,
 } from "../../types";
 import StorageDrawer from "../StorageDrawer.vue";
+import ConfirmDialog from "../ConfirmDialog.vue";
 import { useToast } from "../../composables/useToast";
 
 const props = defineProps<{
@@ -320,6 +321,104 @@ async function refreshGpsFiles() {
     gpsLoading.value = false;
   }
 }
+
+// ===== GPS 文件删除 =====
+const gpsDeleting = ref(false);
+
+type PendingDelete =
+  | { kind: "single"; name: string }
+  | { kind: "all"; count: number; size: string };
+
+/** 待确认的删除操作，null 表示没有弹窗 */
+const pendingDelete = ref<PendingDelete | null>(null);
+
+const deleteConfirmMessage = computed(() => {
+  const pending = pendingDelete.value;
+  if (!pending) return "";
+  if (pending.kind === "all") {
+    return `确定删除 SD 卡上的全部 ${pending.count} 个 GPS 文件（合计 ${pending.size}）？删除后无法恢复。`;
+  }
+  return `确定删除 ${pending.name}？删除后无法恢复。`;
+});
+
+/** 请求删除单个 GPS 文件（先弹确认框） */
+function requestDeleteGpsFile(file: { name: string }) {
+  if (!props.connected || !props.deviceIp || gpsDeleting.value || downloadState.value) {
+    return;
+  }
+  pendingDelete.value = { kind: "single", name: file.name };
+}
+
+/** 请求删除全部 GPS 文件（先弹确认框） */
+function requestDeleteAllGpsFiles() {
+  if (!props.connected || !props.deviceIp || gpsDeleting.value || downloadState.value) {
+    return;
+  }
+  const count = gpsFiles.value.length;
+  if (count === 0) return;
+  pendingDelete.value = {
+    kind: "all",
+    count,
+    size: formatSize(gpsTotalSize.value),
+  };
+}
+
+/** 确认后执行删除 */
+async function confirmDelete() {
+  const pending = pendingDelete.value;
+  pendingDelete.value = null;
+  if (!pending) return;
+
+  if (pending.kind === "single") {
+    await doDeleteGpsFile(pending.name);
+  } else {
+    await doDeleteAllGpsFiles();
+  }
+}
+
+async function doDeleteGpsFile(name: string) {
+  const deviceIp = props.deviceIp;
+  if (!deviceIp) return;
+  gpsDeleting.value = true;
+  try {
+    await invoke("delete_sd_file", { deviceIp, filename: name });
+    toast.success("GPS 文件已删除", name);
+    await refreshGpsFiles();
+  } catch (e) {
+    console.error("delete_sd_file failed:", e);
+    toast.error("删除 GPS 文件失败", String(e));
+  } finally {
+    gpsDeleting.value = false;
+  }
+}
+
+async function doDeleteAllGpsFiles() {
+  const deviceIp = props.deviceIp;
+  if (!deviceIp) return;
+  gpsDeleting.value = true;
+  try {
+    const result = await invoke<{ deleted: number; failed: string[] }>(
+      "delete_all_gps_files",
+      { deviceIp }
+    );
+    if (result.failed.length > 0) {
+      toast.warning(
+        "部分 GPS 文件删除失败",
+        `已删除 ${result.deleted} 个，失败 ${result.failed.length} 个：${result.failed
+          .slice(0, 3)
+          .join("；")}`
+      );
+    } else {
+      toast.success("GPS 文件已全部删除", `共删除 ${result.deleted} 个文件`);
+    }
+    await refreshGpsFiles();
+  } catch (e) {
+    console.error("delete_all_gps_files failed:", e);
+    toast.error("删除 GPS 文件失败", String(e));
+  } finally {
+    gpsDeleting.value = false;
+  }
+}
 </script>
 
 <template>
@@ -460,13 +559,26 @@ async function refreshGpsFiles() {
       :error="gpsError"
       :files="gpsDrawerFiles"
       :download="downloadState"
-      :can-download="canDownloadSd"
+      :can-download="canDownloadSd && !gpsDeleting"
+      :deleting="gpsDeleting"
       :download-error="downloadError"
       :download-message="downloadMessage"
       @close="gpsDrawerVisible = false"
       @refresh="refreshGpsFiles"
       @download="downloadSdFile"
       @cancel-download="cancelDownload"
+      @delete="requestDeleteGpsFile"
+      @delete-all="requestDeleteAllGpsFiles"
+    />
+
+    <ConfirmDialog
+      :visible="pendingDelete !== null"
+      title="删除 GPS 文件"
+      :message="deleteConfirmMessage"
+      confirm-text="删除"
+      danger
+      @cancel="pendingDelete = null"
+      @confirm="confirmDelete"
     />
   </div>
 </template>

@@ -41,3 +41,35 @@ pub async fn download_sd_file(
 pub fn cancel_sd_download() {
     device_sftp::cancel();
 }
+
+/// 删除 SD 卡上的单个 GPS 文件
+#[tauri::command]
+pub async fn delete_sd_file(
+    app: AppHandle,
+    device_ip: String,
+    filename: String,
+) -> Result<(), String> {
+    // 与下载互斥，避免边下载边删除同一个文件
+    let _download = try_acquire_download_lock(&app).await?;
+    let dir = app.state::<AppConfig>().gps.dir.clone();
+
+    tokio::task::spawn_blocking(move || {
+        device_sftp::delete_sd_file(&device_ip, &dir, &filename)
+    })
+    .await
+    .map_err(|e| format!("SD 卡删除任务失败: {}", e))?
+}
+
+/// 删除 SD 卡上的所有 GPS 数据文件（只匹配 pos_*.bin）
+#[tauri::command]
+pub async fn delete_all_gps_files(
+    app: AppHandle,
+    device_ip: String,
+) -> Result<device_sftp::SdDeleteResult, String> {
+    let _download = try_acquire_download_lock(&app).await?;
+    let dir = app.state::<AppConfig>().gps.dir.clone();
+
+    tokio::task::spawn_blocking(move || device_sftp::delete_all_gps_files(&device_ip, &dir))
+        .await
+        .map_err(|e| format!("SD 卡删除任务失败: {}", e))?
+}
