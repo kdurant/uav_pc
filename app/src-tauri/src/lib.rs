@@ -175,6 +175,7 @@ pub fn run() {
             commands::set_trg_mode,
             commands::laser_command,
             commands::motor_command,
+            commands::passthrough_command,
             commands::load_temperature_history,
             commands::save_temperature_history,
             commands::get_temperature_config,

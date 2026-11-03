@@ -16,6 +16,7 @@ import CloudBar from "./CloudBar.vue";
 import DebugMenu from "./DebugMenu.vue";
 import ConfigDialog from "./ConfigDialog.vue";
 import SetupWizard from "./SetupWizard.vue";
+import PassthroughDialog from "./PassthroughDialog.vue";
 
 // three.js 体积较大，点云视图按需加载，避免拖慢首屏
 const PointCloudView = defineAsyncComponent(() => import("./PointCloudView.vue"));
@@ -91,6 +92,8 @@ const showDeviceSelector = ref(false);
 const showConfig = ref(false);
 // 设置向导弹窗
 const showWizard = ref(false);
+// 命令透传弹窗
+const showPassthrough = ref(false);
 const isConnecting = ref(false);
 
 // 通道可见性
@@ -391,11 +394,12 @@ handleSearch();
           </div>
         </div>
 
-        <!-- 调试菜单：设置向导 / 离线回放 / 点云地形，需密码解锁 -->
+        <!-- 调试菜单：设置向导 / 命令透传 / 离线回放 / 点云地形，需密码解锁 -->
         <DebugMenu
           :replay-active="replayActive"
           :cloud-active="cloudActive"
           @wizard="showWizard = true"
+          @passthrough="showPassthrough = true"
           @replay="toggleReplay"
           @cloud="toggleCloud"
         />
@@ -529,6 +533,13 @@ handleSearch();
       :status-active="statusActive"
       @search="handleSearch"
       @toggle-status="handleToggleStatus"
+    />
+
+    <!-- 命令透传：串口回环测试 -->
+    <PassthroughDialog
+      v-model:visible="showPassthrough"
+      :connected="connectionState === ConnectionState.Connected"
+      :device-ip="selectedDevice?.ip"
     />
 
   </div>

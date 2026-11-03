@@ -513,3 +513,106 @@ pub async fn motor_command(
         other => Err(format!("未知的电机操作: {}", other)),
     }
 }
+
+// ========== 串口命令透传 ==========
+
+/// 支持透传的命令码及设备端串口对应关系：
+/// 0x0200 → /dev/ttyS1；0x0203 → /dev/ttyS3；0x0eff → /dev/ttyS3；0x0f00 → /dev/ttyS2
+pub const PASSTHROUGH_PORTS: [(u16, &str); 4] = [
+    (0x0200, "/dev/ttyS1"),
+    (0x0203, "/dev/ttyS3"),
+    (0x0eff, "/dev/ttyS3"),
+    (0x0f00, "/dev/ttyS2"),
+];
+
+/// 单次透传允许的最大数据长度（字节）
+const PASSTHROUGH_MAX_BYTES: usize = 4096;
+
+/// 命令码对应的设备端串口；不在白名单返回 None
+fn passthrough_port(cmd: u16) -> Option<&'static str> {
+    PASSTHROUGH_PORTS
+        .iter()
+        .find(|(code, _)| *code == cmd)
+        .map(|(_, port)| *port)
+}
+
+/// 串口命令透传：把用户数据原样发给设备，由设备转发到对应串口。
+/// 设备串口需在外部短接 RX/TX，才能把发送数据回环回来。
+/// 返回等待窗口内收到的所有同命令码应答数据（按到达顺序）。
+#[tauri::command]
+pub async fn passthrough_command(
+    app: AppHandle,
+    device_ip: String,
+    cmd: u16,
+    data: Vec<u8>,
+    timeout_ms: Option<u64>,
+) -> Result<Vec<Vec<u8>>, String> {
+    let port = passthrough_port(cmd)
+        .ok_or_else(|| format!("不支持透传的命令码: 0x{:04x}", cmd))?;
+    if data.is_empty() {
+        return Err("发送数据不能为空".into());
+    }
+    if data.len() > PASSTHROUGH_MAX_BYTES {
+        return Err(format!(
+            "单次发送数据不能超过 {} 字节",
+            PASSTHROUGH_MAX_BYTES
+        ));
+    }
+
+    // 与激光器/电机共用同一把串行锁，避免应答互相串台
+    let _op = acquire_op_lock(&app).await;
+    let network = get_or_init_network(&app).await?;
+    let target = device_target(&app, &device_ip).await?;
+
+    // 先订阅再发送，避免设备应答早于订阅而丢失
+    let mut rx = subscribe_frames(&app).await;
+    let data_len = data.len();
+    send_frame(&app, &network, target, cmd, data).await?;
+
+    let wait_ms = timeout_ms.unwrap_or(600).clamp(100, 5000);
+    log::info!(
+        "Passthrough 0x{:04x} -> {} ({} bytes), wait {} ms",
+        cmd,
+        port,
+        data_len,
+        wait_ms
+    );
+
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(wait_ms);
+    let mut responses: Vec<Vec<u8>> = Vec::new();
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Ok((frame, addr))) => {
+                // 只接收目标设备、同一命令码的回环数据
+                if frame.cmd == cmd && addr.ip() == target.ip() {
+                    responses.push(frame.data);
+                }
+            }
+            Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+            Ok(Err(broadcast::error::RecvError::Closed)) => {
+                return Err("UDP 帧通道已关闭".into())
+            }
+            Err(_) => break,
+        }
+    }
+
+    Ok(responses)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_passthrough_port_mapping() {
+        assert_eq!(passthrough_port(0x0200), Some("/dev/ttyS1"));
+        assert_eq!(passthrough_port(0x0203), Some("/dev/ttyS3"));
+        assert_eq!(passthrough_port(0x0eff), Some("/dev/ttyS3"));
+        assert_eq!(passthrough_port(0x0f00), Some("/dev/ttyS2"));
+        assert_eq!(passthrough_port(0x0300), None);
+    }
+}

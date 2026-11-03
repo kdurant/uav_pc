@@ -17,7 +17,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-    (e: "replay" | "cloud" | "wizard"): void;
+    (e: "replay" | "cloud" | "wizard" | "passthrough"): void;
 }>();
 
 const rootRef = ref<HTMLDivElement | null>(null);
@@ -79,7 +79,7 @@ function toggleMenu() {
 }
 
 /** 菜单项点击：先收起菜单，再执行对应操作 */
-function choose(action: "replay" | "cloud" | "wizard") {
+function choose(action: "replay" | "cloud" | "wizard" | "passthrough") {
     menuOpen.value = false;
     emit(action);
 }
@@ -143,6 +143,19 @@ onUnmounted(() => {
           <path d="M15.5 8.5l-2 5-5 2 2-5 5-2z" />
         </svg>
         <span>设置向导</span>
+      </button>
+
+      <button
+        class="menu-item"
+        @click="choose('passthrough')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="3" />
+          <path d="M7 9l3 3-3 3" />
+          <path d="M13 15h4" />
+        </svg>
+        <span>命令透传</span>
       </button>
 
       <button
