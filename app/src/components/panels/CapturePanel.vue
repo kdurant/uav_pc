@@ -56,6 +56,9 @@ onMounted(async () => {
   applyCaptureConfig();
 });
 
+// 设置界面保存后共享配置会被替换，这里同步刷新输入框
+watch(capture, () => applyCaptureConfig());
+
 async function setPreviewEnable() {
   if (!props.connected || !props.deviceIp) return;
   const enable = previewEnabled.value;

@@ -72,9 +72,35 @@ pub struct NetworkState {    pub network: Option<Arc<UdpNetwork>>,
     pub download_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
+/// 运行期可写的配置状态：保存 config.toml 后同步更新，
+/// 使不依赖启动时绑定的配置项立即生效，无需重启上位机。
+pub struct ConfigState(pub std::sync::RwLock<AppConfig>);
+
+/// 获取当前配置的快照（克隆），避免跨 await 持有读锁
+pub fn current_config(app: &AppHandle) -> AppConfig {
+    app.state::<ConfigState>()
+        .0
+        .read()
+        .expect("config lock poisoned")
+        .clone()
+}
+
+/// 保存配置的结果
+#[derive(Debug, Clone, Serialize)]
+pub struct SaveConfigResult {
+    /// true：本机 IP / 端口发生变化，需要重启上位机后重新绑定 socket
+    pub restart_required: bool,
+}
+
+/// 是否需要重启上位机：只有本机绑定 IP / 端口这类启动期参数需要
+fn config_restart_required(old: &AppConfig, new: &AppConfig) -> bool {
+    old.basic.local_ip.trim() != new.basic.local_ip.trim()
+        || old.basic.local_port != new.basic.local_port
+}
+
 /// 获取或初始化 NetworkState
 async fn get_or_init_network(app: &AppHandle) -> Result<Arc<UdpNetwork>, String> {
-    let config = app.state::<AppConfig>();
+    let config = current_config(app);
     let state = app.state::<Arc<Mutex<NetworkState>>>();
 
     let mut guard = state.lock().await;
@@ -143,10 +169,7 @@ fn temperature_history_path(app: &AppHandle) -> std::path::PathBuf {
 /// 读取历史温度点；文件不存在或损坏时返回空列表
 #[tauri::command]
 pub async fn load_temperature_history(app: AppHandle) -> Result<Vec<TemperaturePoint>, String> {
-    let save_points = {
-        let config = app.state::<AppConfig>();
-        config.temperature.save_points.max(1)
-    };
+    let save_points = current_config(&app).temperature.save_points.max(1);
     let path = temperature_history_path(&app);
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Ok(Vec::new());
@@ -168,10 +191,7 @@ pub async fn save_temperature_history(
     app: AppHandle,
     points: Vec<TemperaturePoint>,
 ) -> Result<(), String> {
-    let save_points = {
-        let config = app.state::<AppConfig>();
-        config.temperature.save_points.max(1)
-    };
+    let save_points = current_config(&app).temperature.save_points.max(1);
     let start = points.len().saturating_sub(save_points);
     let kept = &points[start..];
     let text = serde_json::to_string(kept).map_err(|e| format!("序列化温度历史失败: {}", e))?;
@@ -183,19 +203,19 @@ pub async fn save_temperature_history(
 /// 读取温度历史配置
 #[tauri::command]
 pub fn get_temperature_config(app: AppHandle) -> crate::config::TemperatureConfig {
-    app.state::<AppConfig>().temperature.clone()
+    current_config(&app).temperature
 }
 
 /// 读取雷达显示名称、激光器类型和自定义信息
 #[tauri::command]
 pub fn get_radar_config(app: AppHandle) -> crate::config::RadarConfig {
-    app.state::<AppConfig>().radar.clone()
+    current_config(&app).radar
 }
 
 /// 读取完整配置（供设置界面展示）
 #[tauri::command]
 pub fn get_app_config(app: AppHandle) -> AppConfig {
-    app.state::<AppConfig>().inner().clone()
+    current_config(&app)
 }
 
 /// config.toml 的实际路径，界面上展示给用户
@@ -204,15 +224,33 @@ pub fn get_config_path() -> String {
     crate::config::config_path().display().to_string()
 }
 
-/// 保存配置到 config.toml：后端校验通过后原子写入，重启上位机后生效。
-/// 不修改内存中的配置，避免出现"部分生效、部分未生效"的状态。
+/// 保存配置到 config.toml，并同步更新内存中的配置：
+/// 除本机 IP / 端口外，其余配置项立即生效。
 #[tauri::command]
-pub fn save_app_config(config: AppConfig) -> Result<(), String> {
+pub fn save_app_config(app: AppHandle, config: AppConfig) -> Result<SaveConfigResult, String> {
     config.validate()?;
     let path = crate::config::config_path();
+
+    let state = app.state::<ConfigState>();
+    let restart_required = {
+        let old = state
+            .0
+            .read()
+            .map_err(|_| "配置锁已损坏，请重启上位机".to_string())?;
+        config_restart_required(&old, &config)
+    };
+
     config
         .save(&path)
-        .map_err(|e| format!("保存配置失败（{}）: {}", path.display(), e))
+        .map_err(|e| format!("保存配置失败（{}）: {}", path.display(), e))?;
+
+    *state
+        .0
+        .write()
+        .map_err(|_| "配置锁已损坏，请重启上位机".to_string())? = config;
+
+    log::info!("Config saved and applied: {}", path.display());
+    Ok(SaveConfigResult { restart_required })
 }
 
 /// 发现局域网内设备：发送 0x0100 广播，300ms 内收集响应设备；
@@ -221,7 +259,7 @@ pub fn save_app_config(config: AppConfig) -> Result<(), String> {
 pub async fn discover_devices(app: AppHandle) -> Result<Vec<DiscoveredDevice>, String> {
     // broadcast_search = false：不广播，直接使用配置中的设备 IP
     {
-        let config = app.state::<AppConfig>();
+        let config = current_config(&app);
         if !config.basic.broadcast_search {
             let ip_str = config.basic.device_ip.trim();
             let ip: std::net::IpAddr = ip_str.parse().map_err(|_| {
@@ -253,7 +291,7 @@ pub async fn discover_devices(app: AppHandle) -> Result<Vec<DiscoveredDevice>, S
         let seq = guard.seq_counter;
         guard.seq_counter = guard.seq_counter.wrapping_add(1);
 
-        let config = app.state::<AppConfig>();
+        let config = current_config(&app);
 
         let mut frame = Frame::new(
             0x0100,
@@ -308,7 +346,7 @@ pub async fn start_preview(
     device_ip: String,
     enable: bool,
 ) -> Result<(), String> {
-    let config = app.state::<AppConfig>();
+    let config = current_config(&app);
     let network = get_or_init_network(&app).await?;
     let target: SocketAddr = format!("{}:{}", device_ip, config.basic.remote_port)
         .parse()
@@ -370,7 +408,7 @@ async fn next_seq_inner(app: &AppHandle) -> u16 {
 
 /// 设备地址（IP:remote_port）
 async fn device_target(app: &AppHandle, device_ip: &str) -> Result<SocketAddr, String> {
-    let config = app.state::<AppConfig>();
+    let config = current_config(&app);
     format!("{}:{}", device_ip, config.basic.remote_port)
         .parse()
         .map_err(|e| format!("Invalid device address: {}", e))
@@ -496,7 +534,7 @@ pub async fn query_sys_status(
 ) -> Result<(), String> {
     let network = get_or_init_network(&app).await?;
 
-    let config = app.state::<AppConfig>();
+    let config = current_config(&app);
     let target: SocketAddr = format!("{}:{}", device_ip, config.basic.remote_port)
         .parse()
         .map_err(|e| format!("Invalid device address: {}", e))?;
@@ -531,7 +569,7 @@ pub async fn query_sys_status(
 pub async fn send_ref_channel(app: AppHandle, device_ip: String) -> Result<(), String> {
     let network = get_or_init_network(&app).await?;
 
-    let config = app.state::<AppConfig>();
+    let config = current_config(&app);
     let target: SocketAddr = format!("{}:{}", device_ip, config.basic.remote_port)
         .parse()
         .map_err(|e| format!("Invalid device address: {}", e))?;
@@ -562,7 +600,7 @@ pub async fn send_command(
 ) -> Result<(), String> {
     let network = get_or_init_network(&app).await?;
 
-    let config = app.state::<AppConfig>();
+    let config = current_config(&app);
     let target: SocketAddr = format!("{}:{}", device_ip, config.basic.remote_port)
         .parse()
         .map_err(|e| format!("Invalid device address: {}", e))?;
@@ -615,7 +653,7 @@ pub async fn set_trg_mode(
     let target = device_target(&app, &device_ip).await?;
 
     if mode == 2 {
-        let pin_threshold = app.state::<AppConfig>().capture.pin_threshold;
+        let pin_threshold = current_config(&app).capture.pin_threshold;
         send_frame(
             &app,
             &network,
@@ -653,7 +691,8 @@ pub use storage::*;
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_device_ip;
+    use super::{config_restart_required, resolve_device_ip};
+    use crate::config::AppConfig;
     use std::net::SocketAddr;
 
     #[test]
@@ -662,5 +701,23 @@ mod tests {
         assert_eq!(resolve_device_ip(b"", &addr), "192.168.1.10");
         assert_eq!(resolve_device_ip(b"\0\0\0\0", &addr), "192.168.1.10");
         assert_eq!(resolve_device_ip(b"192.168.1.20\0", &addr), "192.168.1.20");
+    }
+
+    #[test]
+    fn test_restart_required_only_for_local_binding() {
+        let old = AppConfig::default();
+
+        let mut new = old.clone();
+        new.radar.display_name = "新名称".into();
+        new.basic.remote_port = 7000;
+        assert!(!config_restart_required(&old, &new));
+
+        let mut new = old.clone();
+        new.basic.local_port = 23456;
+        assert!(config_restart_required(&old, &new));
+
+        let mut new = old.clone();
+        new.basic.local_ip = "127.0.0.1".into();
+        assert!(config_restart_required(&old, &new));
     }
 }

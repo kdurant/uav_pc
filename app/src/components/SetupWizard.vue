@@ -269,7 +269,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                 </li>
               </ul>
               <p class="step-note">
-                向导中的设置会直接下发到设备；本机 IP、端口等配置文件参数请使用顶部「设置」修改（保存后需重启）。
+                向导中的设置会直接下发到设备；本机 IP、端口等配置文件参数请使用顶部「设置」修改（保存后立即生效，本机 IP / 端口需重启）。
               </p>
             </div>
           </section>

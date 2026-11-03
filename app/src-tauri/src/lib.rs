@@ -149,7 +149,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(app_config)
+        .manage(commands::ConfigState(std::sync::RwLock::new(app_config)))
         .manage(commands::ReplayState::default())
         .manage(Arc::new(Mutex::new(NetworkState {
             network: None,

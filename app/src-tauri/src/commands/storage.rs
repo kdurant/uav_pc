@@ -179,7 +179,7 @@ pub async fn list_ssd_files(app: AppHandle, device_ip: String) -> Result<Vec<Ssd
     let _ssd = acquire_ssd_lock(&app).await;
     let network = get_or_init_network(&app).await?;
 
-    let config = app.state::<AppConfig>();
+    let config = current_config(&app);
     let target: SocketAddr = format!("{}:{}", device_ip, config.basic.remote_port)
         .parse()
         .map_err(|e| format!("Invalid device address: {}", e))?;
@@ -211,7 +211,7 @@ pub async fn set_ssd_store(
     let _ssd = acquire_ssd_lock(&app).await;
     let network = get_or_init_network(&app).await?;
 
-    let config = app.state::<AppConfig>();
+    let config = current_config(&app);
     let target: SocketAddr = format!("{}:{}", device_ip, config.basic.remote_port)
         .parse()
         .map_err(|e| format!("Invalid device address: {}", e))?;
@@ -371,7 +371,7 @@ pub async fn query_gps_files(app: AppHandle, device_ip: String) -> Result<Vec<St
     let _op = acquire_op_lock(&app).await;
     let network = get_or_init_network(&app).await?;
 
-    let config = app.state::<AppConfig>();
+    let config = current_config(&app);
     let target: SocketAddr = format!("{}:{}", device_ip, config.basic.remote_port)
         .parse()
         .map_err(|e| format!("Invalid device address: {}", e))?;
@@ -645,7 +645,7 @@ pub async fn download_ssd_file(
     let _ssd = try_acquire_ssd_lock(&app).await?;
 
     // 分块大小由 config.toml 的 [ssd].chunk_mb 指定，仅支持 1/2/4 MB
-    let chunk_mb = app.state::<AppConfig>().ssd.chunk_mb;
+    let chunk_mb = current_config(&app).ssd.chunk_mb;
     let chunk_sectors = chunk_sectors_from_mb(chunk_mb)?;
 
     if total_sectors == 0 {
@@ -689,7 +689,7 @@ pub async fn download_ssd_file(
     let part_path = dir.join(format!("{}.part", safe_name));
     let final_path = unique_path(dir, &safe_name);
 
-    let port = app.state::<AppConfig>().basic.remote_port;
+    let port = current_config(&app).basic.remote_port;
     let ip: std::net::IpAddr = device_ip
         .parse()
         .map_err(|e| format!("设备 IP 非法 {}: {}", device_ip, e))?;

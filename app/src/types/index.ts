@@ -148,6 +148,12 @@ export interface AppConfig {
     };
 }
 
+/** 保存配置的结果（对应 Rust SaveConfigResult） */
+export interface SaveConfigResult {
+    /** true：本机 IP / 端口发生变化，需要重启上位机后重新绑定 */
+    restart_required: boolean;
+}
+
 /** 激光器实时状态（对应 Rust LaserStatus） */
 export interface LaserStatus {
     /** 开关状态：0 关闭，其它为开启 */

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig } from "../types";
+import type { AppConfig, SaveConfigResult } from "../types";
 import { useToast } from "../composables/useToast";
+import { useRadarConfig } from "../composables/useRadarConfig";
+import { useCaptureConfig } from "../composables/useCaptureConfig";
 
 /**
  * 配置文件编辑界面：直接读写可执行文件目录下的 config.toml。
- * 保存后不会热更新，需要重启上位机才能生效（本机 IP/端口等本身也必须在启动时绑定）。
+ * 保存后立即同步到内存并生效；仅本机 IP / 端口需要重启上位机重新绑定。
  */
 const props = defineProps<{
     visible: boolean;
@@ -17,6 +19,8 @@ const emit = defineEmits<{
 }>();
 
 const toast = useToast();
+const { reload: reloadRadarConfig } = useRadarConfig();
+const { reload: reloadCaptureConfig } = useCaptureConfig();
 
 /** 可选激光器类型（与后端 laser::is_supported_type 保持一致） */
 const LASER_TYPES = [
@@ -161,7 +165,7 @@ function validateConfig(cfg: AppConfig): string {
     return "";
 }
 
-/** 保存：校验通过后写入 config.toml，重启上位机生效 */
+/** 保存：校验通过后写入 config.toml，并同步到内存立即生效 */
 async function saveConfig() {
     formError.value = validateConfig(form);
     if (formError.value) return;
@@ -176,8 +180,14 @@ async function saveConfig() {
 
     saving.value = true;
     try {
-        await invoke("save_app_config", { config: payload });
-        toast.success("配置已保存", "重启上位机后生效");
+        const result = await invoke<SaveConfigResult>("save_app_config", { config: payload });
+        // 同步刷新前端缓存（显示名称、激光器类型、采集参数等）
+        await Promise.all([reloadRadarConfig(), reloadCaptureConfig()]);
+        if (result.restart_required) {
+            toast.success("配置已保存", "其余配置已生效；本机 IP / 端口需重启上位机后生效");
+        } else {
+            toast.success("配置已保存", "配置已立即生效");
+        }
         close();
     } catch (e) {
         formError.value = String(e);
@@ -214,7 +224,7 @@ watch(
             </div>
             <div class="modal-titles">
               <h3>配置设置</h3>
-              <p>修改后需重启上位机生效</p>
+              <p>保存后立即生效，本机 IP / 端口除外</p>
             </div>
           </div>
           <button class="close-btn" aria-label="关闭" @click="close">
@@ -232,13 +242,13 @@ watch(
             <section class="cfg-section">
               <h4 class="cfg-title">网络</h4>
               <div class="cfg-grid">
-                <label class="cfg-field">
-                  <span>本机 IP</span>
+                <label class="cfg-field restart-field">
+                  <span>本机 IP <i class="restart-tag">需重启</i></span>
                   <input v-model="form.basic.local_ip" class="cfg-input" type="text"
                     placeholder="192.168.93.44" />
                 </label>
-                <label class="cfg-field">
-                  <span>本机端口</span>
+                <label class="cfg-field restart-field">
+                  <span>本机端口 <i class="restart-tag">需重启</i></span>
                   <input v-model.number="form.basic.local_port" class="cfg-input" type="number"
                     min="1" max="65535" />
                 </label>
@@ -257,7 +267,9 @@ watch(
                     placeholder="关闭广播搜索时必填" :disabled="form.basic.broadcast_search" />
                 </label>
               </div>
-              <p class="cfg-hint">修改本机 IP / 端口后，需要重启上位机重新绑定网络。</p>
+              <p class="cfg-hint">
+                橙色背景的参数（本机 IP / 端口）修改后需重启上位机才能重新绑定网络，其余参数保存后立即生效。
+              </p>
             </section>
 
             <!-- 设备信息 -->
@@ -289,7 +301,7 @@ watch(
             <section class="cfg-section">
               <h4 class="cfg-title">采集参数</h4>
               <p class="cfg-hint">
-                采集面板启动时会用这里的参数初始化输入框（pin_threshold 暂未使用），修改后需重启上位机生效。
+                采集面板会立即使用这里的参数刷新输入框（pin_threshold 暂未使用），不会自动下发设备。
               </p>
               <div class="cfg-grid">
                 <label v-for="field in CAPTURE_FIELDS" :key="field.key" class="cfg-field">
@@ -512,6 +524,30 @@ watch(
 
 .cfg-field.disabled {
   opacity: 0.55;
+}
+
+/* 需要重启上位机才能生效的参数，用橙色背景突出显示 */
+.cfg-field.restart-field {
+  padding: 6px 8px;
+  border: 1px solid #fde3b8;
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+}
+
+.cfg-field.restart-field > span {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.restart-tag {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #f7d9a8;
+  color: #8a5d0a;
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 600;
 }
 
 .cfg-check {

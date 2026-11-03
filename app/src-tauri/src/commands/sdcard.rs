@@ -10,7 +10,7 @@ pub async fn list_sd_files(
     app: AppHandle,
     device_ip: String,
 ) -> Result<Vec<device_sftp::SdFile>, String> {
-    let dir = app.state::<AppConfig>().gps.dir.clone();
+    let dir = current_config(&app).gps.dir.clone();
     tokio::task::spawn_blocking(move || device_sftp::list_sd_files(&device_ip, &dir))
         .await
         .map_err(|e| format!("SD 卡文件检索任务失败: {}", e))?
@@ -26,7 +26,7 @@ pub async fn download_sd_file(
     channel: Channel<SsdDownloadProgress>,
 ) -> Result<String, String> {
     let _download = try_acquire_download_lock(&app).await?;
-    let dir = app.state::<AppConfig>().gps.dir.clone();
+    let dir = current_config(&app).gps.dir.clone();
     device_sftp::reset_cancel();
 
     tokio::task::spawn_blocking(move || {
@@ -51,7 +51,7 @@ pub async fn delete_sd_file(
 ) -> Result<(), String> {
     // 与下载互斥，避免边下载边删除同一个文件
     let _download = try_acquire_download_lock(&app).await?;
-    let dir = app.state::<AppConfig>().gps.dir.clone();
+    let dir = current_config(&app).gps.dir.clone();
 
     tokio::task::spawn_blocking(move || {
         device_sftp::delete_sd_file(&device_ip, &dir, &filename)
@@ -67,7 +67,7 @@ pub async fn delete_all_gps_files(
     device_ip: String,
 ) -> Result<device_sftp::SdDeleteResult, String> {
     let _download = try_acquire_download_lock(&app).await?;
-    let dir = app.state::<AppConfig>().gps.dir.clone();
+    let dir = current_config(&app).gps.dir.clone();
 
     tokio::task::spawn_blocking(move || device_sftp::delete_all_gps_files(&device_ip, &dir))
         .await

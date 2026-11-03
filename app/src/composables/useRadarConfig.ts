@@ -3,16 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import type { RadarConfig } from "../types";
 
 /**
- * 全局雷达配置：只从后端读取一次，Layout 和激光器面板共享。
- * config.toml 修改后需要重启上位机生效。
+ * 全局雷达配置：从后端读取，Layout 和激光器面板共享。
+ * 设置界面保存后会调用 reload() 立即刷新，无需重启上位机。
  */
 const displayName = ref("雷达");
 const laserType = ref("laser_connet");
 const loaded = ref(false);
 let loading: Promise<void> | null = null;
 
-async function loadRadarConfig(): Promise<void> {
-    if (loaded.value) return;
+async function loadRadarConfig(force = false): Promise<void> {
+    if (loaded.value && !force) return;
     if (loading) return loading;
 
     loading = (async () => {
@@ -38,5 +38,7 @@ export function useRadarConfig() {
         laserType,
         loaded,
         load: loadRadarConfig,
+        /** 强制重新读取（设置保存后调用） */
+        reload: () => loadRadarConfig(true),
     };
 }

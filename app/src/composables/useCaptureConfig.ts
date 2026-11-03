@@ -3,15 +3,15 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AppConfig } from "../types";
 
 /**
- * 全局采集参数配置：从 config.toml 读取一次，供左侧采集面板和设置向导共享。
- * 仅用于初始化界面输入框，不会自动下发给设备；修改 config.toml 后需重启上位机生效。
+ * 全局采集参数配置：从 config.toml 读取，供左侧采集面板和设置向导共享。
+ * 仅用于初始化界面输入框，不会自动下发给设备；设置界面保存后会 reload() 刷新。
  */
 const capture = ref<AppConfig["capture"] | null>(null);
 const loaded = ref(false);
 let loading: Promise<void> | null = null;
 
-async function loadCaptureConfig(): Promise<void> {
-    if (loaded.value) return;
+async function loadCaptureConfig(force = false): Promise<void> {
+    if (loaded.value && !force) return;
     if (loading) return loading;
 
     loading = (async () => {
@@ -35,5 +35,7 @@ export function useCaptureConfig() {
         capture,
         loaded,
         load: loadCaptureConfig,
+        /** 强制重新读取（设置保存后调用） */
+        reload: () => loadCaptureConfig(true),
     };
 }

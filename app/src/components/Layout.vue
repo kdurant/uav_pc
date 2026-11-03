@@ -413,7 +413,7 @@ handleSearch();
       </div>
 
       <div class="toolbar-right">
-        <button class="tool-btn" title="打开配置文件设置（保存后需重启生效）" @click="showConfig = true">
+        <button class="tool-btn" title="打开配置文件设置（保存后立即生效，本机 IP / 端口需重启）" @click="showConfig = true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3.2" />

@@ -22,7 +22,7 @@ pub async fn laser_command(
 ) -> Result<Option<LaserStatus>, String> {
     // 根据 config.toml [radar].laser_type 选择激光器通信协议。
     // 目前只有 laser_connet；未知类型直接拒绝，避免用错协议操作激光器。
-    let laser_type = app.state::<AppConfig>().radar.laser_type.trim().to_string();
+    let laser_type = current_config(&app).radar.laser_type.trim().to_string();
     if laser_type.is_empty() {
         return Err("未配置激光器类型（config.toml [radar].laser_type）".into());
     }
