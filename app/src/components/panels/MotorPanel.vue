@@ -14,8 +14,6 @@ const toast = useToast();
 /** 命令动作 → 中文提示名，用于失败通知 */
 const MOTOR_ACTION_LABELS: Record<string, string> = {
   init: "初始化",
-  run: "启动",
-  stop: "停止",
   move_to: "移动到目标位置",
   home: "开始回零",
   home_stop: "停止回零",
@@ -25,9 +23,9 @@ const MOTOR_ACTION_LABELS: Record<string, string> = {
 // ===== 电机控制（0x0f00 透传） =====
 const motorBusy = ref(false);
 const motorState = ref<MotorState | null>(null);
-const motorSpeed = ref(100); // r/s
 const motorTargetPos = ref(0);
-const motorHomeMethod = ref(34);
+/** 回零方法固定使用驱动器默认配置 */
+const MOTOR_HOME_METHOD = 34;
 
 async function motorAction(action: string, value?: number): Promise<boolean> {
   if (!props.connected || !props.deviceIp) return false;
@@ -56,20 +54,12 @@ async function initMotor() {
   await motorAction("init");
 }
 
-async function runMotor() {
-  await motorAction("run", Math.trunc(motorSpeed.value));
-}
-
-async function stopMotor() {
-  await motorAction("stop");
-}
-
 async function moveMotor() {
   await motorAction("move_to", Math.trunc(motorTargetPos.value));
 }
 
 async function homeMotor() {
-  await motorAction("home", Math.trunc(motorHomeMethod.value));
+  await motorAction("home", MOTOR_HOME_METHOD);
 }
 
 async function stopHoming() {
@@ -119,21 +109,16 @@ watch(
     </section>
 
     <section class="ctrl-group">
-      <h4 class="group-title">速度模式</h4>
-      <div class="field-list">
-        <label class="field">
-          <span class="field-label">目标速度 (r/s)</span>
-          <input type="number" v-model.number="motorSpeed" min="0" max="3571" />
-        </label>
-      </div>
+      <h4 class="group-title">电机归零</h4>
       <div class="btn-row">
-        <button class="accent" :disabled="motorBusy" @click="runMotor">运行</button>
-        <button :disabled="motorBusy" @click="stopMotor">停止</button>
+        <button :disabled="motorBusy" @click="homeMotor">开始归零</button>
+        <button :disabled="motorBusy" @click="stopHoming">停止归零</button>
       </div>
+      <p class="hint">使用默认回零方法 34，与驱动器配置保持一致。</p>
     </section>
 
     <section class="ctrl-group">
-      <h4 class="group-title">位置模式</h4>
+      <h4 class="group-title">定位</h4>
       <div class="field-list">
         <label class="field">
           <span class="field-label">目标位置 (steps)</span>
@@ -141,21 +126,6 @@ watch(
         </label>
       </div>
       <button class="block" :disabled="motorBusy" @click="moveMotor">绝对定位</button>
-    </section>
-
-    <section class="ctrl-group">
-      <h4 class="group-title">回零</h4>
-      <div class="field-list">
-        <label class="field">
-          <span class="field-label">回零方法</span>
-          <input type="number" v-model.number="motorHomeMethod" min="0" max="35" />
-        </label>
-      </div>
-      <div class="btn-row">
-        <button :disabled="motorBusy" @click="homeMotor">开始回零</button>
-        <button :disabled="motorBusy" @click="stopHoming">停止回零</button>
-      </div>
-      <p class="hint">回零方法与驱动器配置需一致，默认 34。</p>
     </section>
   </div>
 </template>
