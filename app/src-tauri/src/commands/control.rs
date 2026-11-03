@@ -536,9 +536,19 @@ fn passthrough_port(cmd: u16) -> Option<&'static str> {
         .map(|(_, port)| *port)
 }
 
+/// 一条透传回环数据（包含实际应答的命令码，便于排查设备返回了其他命令码的情况）
+#[derive(Debug, Clone, Serialize)]
+pub struct PassthroughResponse {
+    pub cmd: u16,
+    pub data: Vec<u8>,
+}
+
+/// 周期性/状态类帧：透传等待窗口内会持续上报，需过滤掉，避免误判为回环数据
+const PASSTHROUGH_IGNORED_CMDS: [u16; 3] = [0x0100, 0x0102, 0x0300];
+
 /// 串口命令透传：把用户数据原样发给设备，由设备转发到对应串口。
 /// 设备串口需在外部短接 RX/TX，才能把发送数据回环回来。
-/// 返回等待窗口内收到的所有同命令码应答数据（按到达顺序）。
+/// 等待窗口内收集目标设备返回的帧（过滤状态类帧，不限定命令码），由界面标注实际命令码。
 #[tauri::command]
 pub async fn passthrough_command(
     app: AppHandle,
@@ -546,7 +556,7 @@ pub async fn passthrough_command(
     cmd: u16,
     data: Vec<u8>,
     timeout_ms: Option<u64>,
-) -> Result<Vec<Vec<u8>>, String> {
+) -> Result<Vec<PassthroughResponse>, String> {
     let port = passthrough_port(cmd)
         .ok_or_else(|| format!("不支持透传的命令码: 0x{:04x}", cmd))?;
     if data.is_empty() {
@@ -579,7 +589,7 @@ pub async fn passthrough_command(
     );
 
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(wait_ms);
-    let mut responses: Vec<Vec<u8>> = Vec::new();
+    let mut responses: Vec<PassthroughResponse> = Vec::new();
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
@@ -587,9 +597,23 @@ pub async fn passthrough_command(
         }
         match tokio::time::timeout(remaining, rx.recv()).await {
             Ok(Ok((frame, addr))) => {
-                // 只接收目标设备、同一命令码的回环数据
-                if frame.cmd == cmd && addr.ip() == target.ip() {
-                    responses.push(frame.data);
+                // 只接收目标设备返回的帧；过滤状态/预览等周期性帧，
+                // 不限定命令码，便于发现设备改用其他命令码应答
+                if addr.ip() == target.ip()
+                    && !PASSTHROUGH_IGNORED_CMDS.contains(&frame.cmd)
+                {
+                    log::debug!(
+                        "Passthrough response: cmd=0x{:04x}, len={}",
+                        frame.cmd,
+                        frame.data.len()
+                    );
+                    responses.push(PassthroughResponse {
+                        cmd: frame.cmd,
+                        data: frame.data,
+                    });
+                    if responses.len() >= 64 {
+                        break;
+                    }
                 }
             }
             Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,

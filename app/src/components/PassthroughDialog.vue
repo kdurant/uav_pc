@@ -50,6 +50,20 @@ const selectedShort = computed(
     () => COMMANDS.find((c) => c.value === selectedCmd.value)?.short ?? "-"
 );
 
+/**
+ * 0x0203 与 0x0eff 共用 ttyS3，设备端 [uart.port3].role 只能二选一，
+ * 选错角色时设备会静默丢弃数据，因此需要提前提示修改设备配置文件。
+ */
+const configTip = computed(() => {
+    if (selectedCmd.value === 0x0203) {
+        return '需确认设备端 config.toml：[uart.port3] role = "double"。若已改为 "motor_xeryon"，0x0203 将不会转发。';
+    }
+    if (selectedCmd.value === 0x0eff) {
+        return '需把设备端 config.toml 的 [uart.port3] role 改为 "motor_xeryon" 并重启设备程序。0x0203 与 0x0eff 共用 ttyS3，二选一；若仍为 "double"，0x0eff 会被设备静默丢弃。';
+    }
+    return "";
+});
+
 function formatCmd(cmd: number): string {
     return `0x${cmd.toString(16).padStart(4, "0")}`;
 }
@@ -108,7 +122,7 @@ async function send() {
     pushEntry("tx", text, toHex(bytes));
     sending.value = true;
     try {
-        const responses = await invoke<number[][]>("passthrough_command", {
+        const responses = await invoke<{ cmd: number; data: number[] }[]>("passthrough_command", {
             deviceIp: props.deviceIp,
             cmd: selectedCmd.value,
             data: bytes,
@@ -117,11 +131,17 @@ async function send() {
         if (!responses.length) {
             pushEntry(
                 "info",
-                `等待 ${timeoutMs.value}ms 未收到回环数据，请检查设备端是否已短接 ${selectedShort.value}（${selectedPort.value} 的 RX/TX）`
+                `等待 ${timeoutMs.value}ms 未收到任何回包，请检查设备端是否已短接 ${selectedShort.value}（${selectedPort.value} 的 RX/TX），或确认设备固件是否支持 0x${selectedCmd.value.toString(16).padStart(4, "0")} 透传`
             );
         } else {
-            for (const data of responses) {
-                pushEntry("rx", decodeText(data), toHex(data));
+            for (const resp of responses) {
+                pushEntry("rx", decodeText(resp.data), toHex(resp.data), formatCmd(resp.cmd));
+                if (resp.cmd !== selectedCmd.value) {
+                    pushEntry(
+                        "info",
+                        `设备实际应答命令码为 ${formatCmd(resp.cmd)}，与发送的 ${formatCmd(selectedCmd.value)} 不一致`
+                    );
+                }
             }
         }
     } catch (e) {
@@ -198,6 +218,10 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
             <span class="port-short">短接 {{ selectedShort }}</span>
             <span class="port-cmd">{{ formatCmd(selectedCmd) }}</span>
           </div>
+
+          <p v-if="configTip" class="config-tip">
+            {{ configTip }}
+          </p>
 
           <div class="send-row">
             <input
@@ -451,6 +475,18 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   font-size: 10.5px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* 0x0203 / 0x0eff 的设备端串口角色提示 */
+.config-tip {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid #fde3b8;
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--warning);
 }
 
 .send-row {
