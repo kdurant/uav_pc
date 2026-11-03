@@ -135,20 +135,10 @@ const gridColor = "rgba(16, 24, 40, 0.055)";
 const textColor = "#8b97aa";
 const axisColor = "rgba(16, 24, 40, 0.14)";
 const canvasBg = "#ffffff";
-const hiddenColor = "rgba(147, 160, 180, 0.55)";
 const fontSize = 11;
 
-/** 图表绘图区边距（顶部留出图例空间） */
-const chartMargin = { top: 30, right: 18, bottom: 26, left: 56 };
-
-/** 十六进制颜色 → rgba（用于图例胶囊底色） */
-function withAlpha(color: string, alpha: number): string {
-  const hex = color.replace("#", "");
-  if (!/^[0-9a-f]{3}$|^[0-9a-f]{6}$/i.test(hex)) return color;
-  const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
-  const n = parseInt(full, 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
-}
+/** 图表绘图区边距（通道名称已在底部工具条展示，顶部不再预留图例空间） */
+const chartMargin = { top: 14, right: 18, bottom: 26, left: 56 };
 
 // 鼠标悬停坐标（canvas 像素坐标，-1 表示不在图表区域）
 let hoverX = -1;
@@ -595,53 +585,6 @@ function render(buffers: Float64Array[]) {
   }
 
   ctx.restore();
-
-  // 通道图例（胶囊样式，右对齐到绘图区右上角）
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.font = `600 ${fontSize}px "Inter", "PingFang SC", sans-serif`;
-  const legendY = 15;
-  const legendCount = Math.min(buffers.length, 4);
-  const legendBoxH = 21;
-  const legendGap = 6;
-
-  // 先测量每个胶囊宽度，以便整体右对齐
-  const legendBoxW: number[] = [];
-  let legendTotalW = 0;
-  for (let ch = 0; ch < legendCount; ch++) {
-    const w = ctx.measureText(channelLabel(ch)).width + 30;
-    legendBoxW.push(w);
-    legendTotalW += w;
-  }
-  legendTotalW += legendGap * Math.max(0, legendCount - 1);
-
-  // 右对齐；画布过窄时回退到左边界，避免溢出
-  let legendX = Math.max(margin.left, margin.left + plotW - legendTotalW);
-  for (let ch = 0; ch < legendCount; ch++) {
-    const visible = props.channelVisible[ch];
-    const color = visible ? props.lineColors[ch] || "#2f6fed" : hiddenColor;
-    const label = channelLabel(ch);
-    const boxW = legendBoxW[ch];
-
-    // 胶囊底色
-    ctx.fillStyle = visible ? withAlpha(props.lineColors[ch] || "#2f6fed", 0.09) : "rgba(147, 160, 180, 0.07)";
-    ctx.beginPath();
-    ctx.roundRect(legendX, legendY - legendBoxH / 2, boxW, legendBoxH, 6);
-    ctx.fill();
-
-    // 色块
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(legendX + 8, legendY - 1.5, 11, 3, 1.5);
-    ctx.fill();
-
-    // 文字
-    ctx.fillStyle = visible ? "#4a5568" : "#a3adbd";
-    ctx.fillText(label, legendX + 23, legendY + 0.5);
-
-    legendX += boxW + legendGap;
-  }
-  ctx.textBaseline = "alphabetic";
 
   // 保存渲染参数供 overlay 使用
   lastRenderState = { margin, plotW, plotH, startIdx, visibleLen, yMin, yMax, xOffset, buffers };
