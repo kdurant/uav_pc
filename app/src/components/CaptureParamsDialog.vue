@@ -923,21 +923,24 @@ function onOverlayClick(e: MouseEvent) {
 
 /* 区间色块 */
 .seg-first {
-  fill: #c7d9fb;
-  opacity: 0.25;
-  transition: opacity 0.35s ease, fill 0.35s ease;
+  fill: #7ea6f2;
+  fill-opacity: 0.45;
+  stroke: #3f6fd8;
+  stroke-width: 1;
+  transition: fill-opacity 0.35s ease, fill 0.35s ease;
 }
 
 .seg-first.lit {
   fill: var(--accent);
-  opacity: 0.6;
+  fill-opacity: 0.85;
 }
 
 /* 第二段搜索范围 */
 .search-range {
-  fill: #f6f8fb;
-  stroke: #d8dee9;
-  stroke-width: 1;
+  fill: #f8e3b9;
+  fill-opacity: 0.9;
+  stroke: #c9922e;
+  stroke-width: 1.1;
   stroke-dasharray: 4 3;
 }
 
@@ -946,8 +949,9 @@ function onOverlayClick(e: MouseEvent) {
 }
 
 .search-range-tag {
-  fill: #b6c0cf;
+  fill: #8a5d0a;
   font-size: 8.5px;
+  font-weight: 600;
 }
 
 /* 搜索窗口：在搜索范围内滑动 */
@@ -978,10 +982,10 @@ function onOverlayClick(e: MouseEvent) {
 
 /* 第二段实际采集区间 */
 .seg-second {
-  fill: #8fd6ab;
-  stroke: var(--success);
+  fill: #57c186;
+  fill-opacity: 0.9;
+  stroke: #0e6b3c;
   stroke-width: 1.2;
-  opacity: 0.8;
 }
 
 .over {
