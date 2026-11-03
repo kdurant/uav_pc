@@ -70,6 +70,21 @@ const {
 /** 任何离线模式（回放 / 点云）都会暂停实时预览 */
 const offlineMode = computed(() => replayActive.value || cloudActive.value);
 
+/**
+ * 预览数据上传速度估算（MB/s）。
+ * 采集频率 / 抽样率 = 预览帧率；每帧字节数 = 88 字节头 + 4 通道 × (12 字节通道头 + 2 × 采样点数)。
+ * 用于提示是否接近 TCP 预览约 5 MB/s 的带宽上限。
+ */
+const previewRateMbps = computed(() => {
+  const st = status.value;
+  if (!st || st.preview_enable !== 1) return null;
+  const freq = st.trg_cycle > 0 ? st.trg_cycle : st.laser_freq;
+  const coe = st.preview_coe;
+  if (!Number.isFinite(freq) || freq <= 0 || coe <= 0) return null;
+  const frameBytes = 136 + 8 * (st.first_len + st.second_len);
+  return ((freq / coe) * frameBytes) / (1024 * 1024);
+});
+
 function toggleReplay() {
   if (replayActive.value) {
     exitReplay();
@@ -469,15 +484,25 @@ handleSearch();
       <main class="panel panel-center">
         <div class="panel-header">
           <span class="panel-title">数据预览</span>
-          <span class="panel-tag" :class="{ replay: replayActive || cloudActive, live: !offlineMode && connectionState === ConnectionState.Connected }">
-            {{
-              cloudActive
-                ? `点云地形 · ${cloudData ? cloudData.pointCount.toLocaleString("zh-CN") + " 点" : "未生成"}`
-                : replayActive
-                  ? `离线回放 · ${replayInfo ? replayInfo.frame_count.toLocaleString("zh-CN") + " 帧" : "未选择文件"}`
-                  : "实时波形 · 4 CH"
-            }}
-          </span>
+          <div class="header-meta">
+            <span class="panel-tag" :class="{ replay: replayActive || cloudActive, live: !offlineMode && connectionState === ConnectionState.Connected }">
+              {{
+                cloudActive
+                  ? `点云地形 · ${cloudData ? cloudData.pointCount.toLocaleString("zh-CN") + " 点" : "未生成"}`
+                  : replayActive
+                    ? `离线回放 · ${replayInfo ? replayInfo.frame_count.toLocaleString("zh-CN") + " 帧" : "未选择文件"}`
+                    : "实时波形 · 4 CH"
+              }}
+            </span>
+            <span
+              v-if="previewRateMbps !== null && !offlineMode"
+              class="preview-rate"
+              :class="{ warn: previewRateMbps > 5 }"
+              title="按当前采集参数估算的预览上传速度；超过约 5 MB/s 时设备可能丢帧"
+            >
+              预览上传 ≈ {{ previewRateMbps.toFixed(2) }} MB/s
+            </span>
+          </div>
         </div>
         <div class="panel-body chart-body">
           <PointCloudView
@@ -809,6 +834,36 @@ handleSearch();
 
 .panel-tag.replay {
   color: var(--accent-dim, #2563eb);
+}
+
+.header-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* 预览上传速度估算 */
+.preview-rate {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-color);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-rate.warn {
+  background: var(--warning-soft);
+  border-color: #fde3b8;
+  color: var(--warning);
 }
 
 .tag-dot {

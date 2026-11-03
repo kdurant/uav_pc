@@ -105,6 +105,60 @@ const canDownloadSd = computed(() => {
   return !!props.connected && !!props.deviceIp && !downloadState.value;
 });
 
+// ===== SSD 容量与写入速率估算 =====
+/** 单次采集写入 SSD 的字节数（与设备端 bytes_of_frame 一致） */
+const storageFrameBytes = computed(() => {
+  const st = props.status;
+  if (!st) return 0;
+  return 128 + 8 * st.first_len + (st.second_len * 2 + 4) * 4;
+});
+
+/** SSD 写入速率（MB/s）：采集频率 × 每帧字节数 */
+const storageRateMbps = computed(() => {
+  const st = props.status;
+  if (!st) return null;
+  const freq = st.trg_cycle > 0 ? st.trg_cycle : st.laser_freq;
+  if (!Number.isFinite(freq) || freq <= 0) return null;
+  return (freq * storageFrameBytes.value) / (1024 * 1024);
+});
+
+/** SSD 总容量（字节），SATA 未连接时返回 null */
+const totalBytes = computed(() => {
+  const st = props.status;
+  if (!st || st.sata_dev_identify_done !== 1 || st.sata_dev_tot_sec_num <= 0) return null;
+  return st.sata_dev_tot_sec_num * 512;
+});
+
+/** SSD 剩余容量（字节）：总扇区数 − 当前写入扇区 */
+const remainingBytes = computed(() => {
+  const st = props.status;
+  const total = totalBytes.value;
+  if (!st || total === null) return null;
+  const used = Math.min(Math.max(st.sata_app_lba_next, 0), st.sata_dev_tot_sec_num);
+  return (st.sata_dev_tot_sec_num - used) * 512;
+});
+
+/** 预计可存储时间（秒） */
+const storageSeconds = computed(() => {
+  const rate = storageRateMbps.value;
+  const remain = remainingBytes.value;
+  if (!rate || rate <= 0 || remain === null) return null;
+  return remain / (rate * 1024 * 1024);
+});
+
+/** 秒数格式化为易读的剩余时间 */
+function formatDuration(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) return "--";
+  const total = Math.floor(seconds);
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (days > 0) return `${days} 天 ${hours} 小时`;
+  if (hours > 0) return `${hours} 小时 ${minutes} 分`;
+  if (minutes > 0) return `${minutes} 分 ${total % 60} 秒`;
+  return `${total} 秒`;
+}
+
 /** 弹出目录选择框；取消返回 null */
 async function chooseSaveDir(title: string): Promise<string | null> {
   let selected: string | string[] | null = null;
@@ -476,6 +530,29 @@ async function doDeleteAllGpsFiles() {
         />
       </label>
       <p class="hint">写入的是采集数据；文件名最多 32 个 ASCII 字符，留空时自动生成。</p>
+
+      <!-- 开启存储后按剩余容量与写入速率估算可存储时间 -->
+      <div
+        v-if="totalBytes !== null && storageRateMbps !== null"
+        class="store-estimate"
+        :class="{ active: storeEnabled || props.status?.ssd_store_enable === 1 }"
+      >
+        <div class="estimate-row">
+          <span class="estimate-label">写入速率</span>
+          <span class="estimate-value">{{ storageRateMbps.toFixed(2) }} MB/s</span>
+        </div>
+        <div class="estimate-row">
+          <span class="estimate-label">磁盘容量</span>
+          <span class="estimate-value">
+            {{ formatSize(remainingBytes ?? 0) }} / {{ formatSize(totalBytes ?? 0) }} 可用
+          </span>
+        </div>
+        <div class="estimate-row">
+          <span class="estimate-label">预计可存储</span>
+          <span class="estimate-value strong">{{ formatDuration(storageSeconds) }}</span>
+        </div>
+        <p class="hint">按当前采集参数与剩余磁盘容量估算，实际受磁盘写入速度和文件系统开销影响。</p>
+      </div>
     </section>
 
     <section class="ctrl-group">
@@ -582,3 +659,49 @@ async function doDeleteAllGpsFiles() {
     />
   </div>
 </template>
+
+<style scoped>
+.store-estimate {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+
+.store-estimate.active {
+  border-color: #bfe3cd;
+  background: var(--success-soft);
+}
+
+.estimate-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  line-height: 1.9;
+}
+
+.estimate-label {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.estimate-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.estimate-value.strong {
+  color: var(--success);
+}
+
+.store-estimate .hint {
+  margin-top: 5px;
+  font-size: 10.5px;
+}
+</style>
