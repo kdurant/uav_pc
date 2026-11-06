@@ -22,6 +22,7 @@ import PassthroughDialog from "./PassthroughDialog.vue";
 const PointCloudView = defineAsyncComponent(() => import("./PointCloudView.vue"));
 import { useReplay } from "../composables/useReplay";
 import { usePointCloud } from "../composables/usePointCloud";
+import { useLocalEndpoint } from "../composables/useLocalEndpoint";
 import { measureTargetDistance } from "../utils/targetDistance";
 import type { TargetMeasurement } from "../utils/targetDistance";
 import { ConnectionState } from "../types";
@@ -46,6 +47,16 @@ const {
 } = useSystemStatus();
 
 const toast = useToast();
+
+// 本机网络端点：连接异常时显示，便于排查本机 IP 配置
+const {
+  label: localLabel,
+  address: localAddress,
+  unbound: localUnbound,
+  hint: localHint,
+  refresh: refreshLocalEndpoint,
+} = useLocalEndpoint();
+void refreshLocalEndpoint();
 
 // 离线数据回放：与实时预览共用中间图表，二者互斥
 const {
@@ -204,14 +215,15 @@ function clearConnectTimer() {
 /** 下发查询后最多等待多久收到第一帧状态 */
 const CONNECT_TIMEOUT_MS = 3500;
 
-watch(statusStale, (stale) => {
+watch(statusStale, async (stale) => {
   if (stale) {
     // 只有已经确认连接后才提示中断；连接中由超时逻辑处理
     if (connectionState.value === ConnectionState.Connected) {
       linkLost.value = true;
+      await refreshLocalEndpoint();
       toast.warning(
         "设备连接中断",
-        `${selectedDevice.value?.ip ?? "设备"} 的状态上报已停止`
+        `${selectedDevice.value?.ip ?? "设备"} 的状态上报已停止；${localHint.value}，请确认与设备同网段`
       );
     }
   } else if (connectionState.value === ConnectionState.Connected && status.value) {
@@ -251,6 +263,26 @@ const statusLabel = computed(() => {
   }
 });
 
+/** 连接异常时在胶囊里展示「本机 -> 设备」的链路路径 */
+const connPath = computed(() => {
+  if (connectFailedIp.value) {
+    return { state: "连接失败", local: localAddress.value, device: connectFailedIp.value };
+  }
+  if (linkLost.value) {
+    return {
+      state: "连接中断",
+      local: localAddress.value,
+      device: selectedDevice.value?.ip ?? "设备",
+    };
+  }
+  return null;
+});
+
+/** 本机 IP 没绑定成功时额外提示（多半是配置的 IP 不属于本机） */
+const showUnboundHint = computed(
+  () => !!connPath.value && localUnbound.value
+);
+
 /** 连接状态胶囊样式 */
 const connectionClass = computed(() => {
   if (connectFailedIp.value) return "is-lost";
@@ -267,6 +299,7 @@ const connectionClass = computed(() => {
 });
 
 async function handleSearch() {
+  void refreshLocalEndpoint();
   linkLost.value = false;
   connectFailedIp.value = "";
   clearConnectTimer();
@@ -297,6 +330,7 @@ function handleSelectDevice(device: (typeof devices.value)[0]) {
 
 async function handleConnect(device: (typeof devices.value)[0]) {
   isConnecting.value = true;
+  void refreshLocalEndpoint();
   linkLost.value = false;
   connectFailedIp.value = "";
   clearConnectTimer();
@@ -307,7 +341,7 @@ async function handleConnect(device: (typeof devices.value)[0]) {
   try {
     // 先注册状态监听，再下发查询命令，避免错过第一帧
     await startStatus();
-    connectTimer = window.setTimeout(() => {
+    connectTimer = window.setTimeout(async () => {
       if (connectionState.value !== ConnectionState.Connecting) return;
       connectTimer = null;
       connectFailedIp.value = device.ip;
@@ -315,9 +349,10 @@ async function handleConnect(device: (typeof devices.value)[0]) {
       stopStatus();
       previewOutput.stop();
       clearSelection();
+      await refreshLocalEndpoint();
       toast.error(
         `连接失败：${device.ip}`,
-        `设备未在 ${CONNECT_TIMEOUT_MS / 1000} 秒内上报状态`
+        `设备未在 ${CONNECT_TIMEOUT_MS / 1000} 秒内上报状态；${localHint.value}，请确认本机 IP 与设备同网段`
       );
       // 尽力关闭设备状态上传
       invoke("query_sys_status", { deviceIp: device.ip, enable: false }).catch(() => {});
@@ -336,7 +371,11 @@ async function handleConnect(device: (typeof devices.value)[0]) {
     connectFailedIp.value = device.ip;
     connectionState.value = ConnectionState.Disconnected;
     clearSelection();
-    toast.error(`连接失败：${device.ip}`, String(err));
+    await refreshLocalEndpoint();
+    toast.error(
+      `连接失败：${device.ip}`,
+      `${String(err)}；${localHint.value}`
+    );
   } finally {
     isConnecting.value = false;
   }
@@ -436,10 +475,27 @@ handleSearch();
           </svg>
           设置
         </button>
-        <div class="conn-pill" :class="connectionClass">
+        <div
+          class="conn-pill"
+          :class="connectionClass"
+          :title="`设备 ${selectedDevice?.ip ?? connectFailedIp ?? '-'} · 本机 ${localLabel}`"
+        >
           <span class="conn-dot"></span>
-          <span class="conn-label">{{ statusLabel }}</span>
+          <template v-if="connPath">
+            <span class="conn-state">{{ connPath.state }}:</span>
+            <span class="conn-addr">{{ connPath.local }}</span>
+            <span class="conn-arrow" aria-hidden="true">→</span>
+            <span class="conn-addr">{{ connPath.device }}</span>
+          </template>
+          <span v-else class="conn-label">{{ statusLabel }}</span>
         </div>
+        <span
+          v-if="showUnboundHint"
+          class="conn-hint"
+          :title="`${localHint}；请检查 config.toml 中的 [basic].local_ip`"
+        >
+          本机 IP 未绑定
+        </span>
         <button
           v-if="connectionState !== ConnectionState.Connected || linkLost"
           class="accent"
@@ -685,7 +741,25 @@ handleSearch();
   font-size: 12.5px;
   font-weight: 500;
   color: var(--text-secondary);
-  max-width: 280px;
+  max-width: 460px;
+}
+
+/* 连接异常时的本机 IP 提示 */
+.conn-hint {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  max-width: 320px;
+  padding: 0 10px;
+  border: 1px solid rgba(220, 38, 38, 0.24);
+  border-radius: 999px;
+  background: rgba(220, 38, 38, 0.07);
+  color: #b91c1c;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .conn-label {
@@ -693,6 +767,38 @@ handleSearch();
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.conn-state {
+  flex-shrink: 0;
+}
+
+/* 本机 / 设备地址：等宽字体便于对比网段 */
+.conn-addr {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 链路方向箭头：来回轻微滑动 */
+.conn-arrow {
+  flex-shrink: 0;
+  color: #e5484d;
+  font-weight: 700;
+  animation: conn-arrow 1.2s ease-in-out infinite;
+}
+
+@keyframes conn-arrow {
+  0%, 100% {
+    transform: translateX(-2px);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translateX(2px);
+    opacity: 1;
+  }
 }
 
 .conn-dot {
@@ -735,6 +841,38 @@ handleSearch();
 .conn-pill.is-lost .conn-dot {
   background: #e5484d;
   box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.14);
+  animation: dot-pulse-error 1.6s ease-in-out infinite;
+}
+
+/* 中断时的轻微呼吸光晕 */
+.conn-pill.is-lost {
+  animation: conn-breathe 2.2s ease-out infinite;
+}
+
+@keyframes conn-breathe {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(229, 72, 77, 0);
+  }
+}
+
+@keyframes dot-pulse-error {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(229, 72, 77, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conn-arrow,
+  .conn-pill.is-lost,
+  .conn-pill.is-lost .conn-dot {
+    animation: none;
+  }
 }
 
 @keyframes dot-pulse {

@@ -189,6 +189,7 @@ pub fn run() {
             commands::get_temperature_config,
             commands::get_radar_config,
             commands::get_app_config,
+            commands::get_local_endpoint,
             commands::get_config_path,
             commands::save_app_config,
             commands::start_preview,

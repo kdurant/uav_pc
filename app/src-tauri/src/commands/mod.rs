@@ -218,6 +218,39 @@ pub fn get_app_config(app: AppHandle) -> AppConfig {
     current_config(&app)
 }
 
+/// 上位机网络端点：连接异常时用于排查本机 IP 配置
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalEndpoint {
+    /// config.toml 中配置的本机 IP
+    pub configured_ip: String,
+    /// config.toml 中配置的本机端口
+    pub configured_port: u16,
+    /// 实际绑定成功的本地地址（未初始化或绑定失败时为空）
+    pub bound_addr: String,
+}
+
+/// 获取上位机网络端点：配置值与实际绑定地址
+#[tauri::command]
+pub async fn get_local_endpoint(app: AppHandle) -> LocalEndpoint {
+    let config = current_config(&app);
+    let bound_addr = {
+        let state = app.state::<Arc<Mutex<NetworkState>>>();
+        let guard = state.lock().await;
+        guard
+            .network
+            .as_ref()
+            .map(|n| n.local_addr().to_string())
+            .unwrap_or_default()
+    };
+
+    LocalEndpoint {
+        configured_ip: config.basic.local_ip,
+        configured_port: config.basic.local_port,
+        bound_addr,
+    }
+}
+
 /// config.toml 的实际路径，界面上展示给用户
 #[tauri::command]
 pub fn get_config_path() -> String {
