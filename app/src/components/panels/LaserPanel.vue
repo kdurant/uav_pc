@@ -413,8 +413,6 @@ const laserStatusItems = computed(() => {
         </div>
       </div>
 
-      <p class="hint">未使能状态查询或未连接时显示占位值；打开“状态查询”后每秒刷新读数。</p>
-      <p class="hint">激光器命令经采集卡透传，单次操作最长等待 1 秒；打开时会自动重新下发电流。</p>
     </section>
   </div>
 </template>

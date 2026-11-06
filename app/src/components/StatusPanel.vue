@@ -312,7 +312,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 
 <template>
   <div class="status-panel">
-    <div v-if="!s" class="status-offline">设备未连接，以下为占位数据</div>
+    <div v-if="!s" class="status-offline">设备未连接</div>
 
     <!-- 版本 -->
     <section class="status-group">

@@ -116,7 +116,6 @@ watch(
       <button class="accent block" :disabled="motorBusy" @click="initMotor">
         {{ motorBusy ? "执行中..." : "初始化驱动器" }}
       </button>
-      <p class="hint">初始化依次下发故障复位、关机、暂停与速度模式参数。</p>
     </section>
 
     <section class="ctrl-group">
@@ -139,7 +138,6 @@ watch(
         <button :disabled="motorBusy" @click="homeMotor">开始归零</button>
         <button :disabled="motorBusy" @click="stopHoming">停止归零</button>
       </div>
-      <p class="hint">使用默认回零方法 34，与驱动器配置保持一致。</p>
     </section>
 
     <section class="ctrl-group">

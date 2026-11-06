@@ -609,7 +609,6 @@ async function doDeleteAllGpsFiles() {
       </template>
       <p v-else-if="gpsQueried" class="ssd-empty">无文件</p>
 
-      <p class="ssd-unit">路径：/run/media/mmcblk1p1/（可在 config.toml [gps].dir 修改）</p>
     </section>
 
     <StorageDrawer

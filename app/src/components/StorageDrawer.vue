@@ -215,7 +215,6 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                     <footer class="drawer-foot">
                         <span class="unit">
                             <template v-if="mode === 'ssd'">地址单位：扇区（512 B）</template>
-                            <template v-else>路径：/run/media/mmcblk1p1/（可在 config.toml [gps].dir 修改）</template>
                         </span>
                         <div class="foot-actions">
                             <button
