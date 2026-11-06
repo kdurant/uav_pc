@@ -20,6 +20,14 @@ const props = defineProps<{
   previewSubTime?: number | null;
   /** 离线回放当前帧的 GPS 信息；有值时覆盖设备实时 GPS 显示 */
   gpsOverride?: ReplayGps | null;
+  /** 与当前设备 SN 匹配的档案（来自云端 NocoDB） */
+  profile?: NocoRecord | null;
+  /** 是否已按 SN 查询过档案 */
+  profileChecked?: boolean;
+  /** 档案查询失败原因（网络/服务端） */
+  profileError?: string;
+  /** 云端档案总数 */
+  profileTotal?: number;
 }>();
 
 const toast = useToast();
@@ -66,6 +74,38 @@ const gpsView = computed(() => {
     pitch: props.status?.gps_pitch,
     roll: props.status?.gps_roll,
   };
+});
+
+/** 设备档案：只展示有值的普通字段（关联字段单独处理） */
+const profileFields = computed(() => {
+  const record = props.profile;
+  if (!record) return [] as Array<[string, string]>;
+  return Object.entries(record.values)
+    .filter(([, v]) => {
+      if (Array.isArray(v)) return false; // 关联字段（激光器/电机）单独展示
+      if (v === null || v === undefined) return false;
+      if (typeof v === "string") return v.trim() !== "";
+      return true;
+    })
+    .map(([k, v]) => [k, String(v)] as [string, string]);
+});
+
+/** 关联的激光器 / 电机：显示关联记录里的型号等名称 */
+const profileLinks = computed(() => {
+  const record = props.profile;
+  if (!record) return [] as Array<[string, string]>;
+  return Object.entries(record.values)
+    .filter(([, v]) => Array.isArray(v) && v.length > 0)
+    .map(([k, v]) => {
+      const names = (v as Array<Record<string, unknown>>)
+        .map((item) => {
+          const entry = Object.entries(item).find(([key]) => key !== "Id");
+          return entry ? String(entry[1]) : "";
+        })
+        .filter((s) => s !== "");
+      return [k, names.join("、")] as [string, string];
+    })
+    .filter(([, names]) => names !== "");
 });
 
 /** 回放标记文本：回放 1,234/170,999 */
@@ -362,6 +402,30 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
       </div>
     </section>
 
+    <!-- 设备档案 -->
+    <section class="status-group">
+      <h4>设备档案</h4>
+      <div v-if="profileFields.length || profileLinks.length" class="row-list">
+        <div v-for="[key, value] in profileFields" :key="key" class="status-row">
+          <span class="label">{{ key }}</span>
+          <span class="value mono profile-value" :title="value">{{ value }}</span>
+        </div>
+        <div v-for="[key, value] in profileLinks" :key="key" class="status-row">
+          <span class="label">{{ key }}</span>
+          <span class="value mono profile-value" :title="value">{{ value }}</span>
+        </div>
+      </div>
+      <p v-else class="profile-tip" :class="{ error: !!profileError }">
+        {{
+          profileError
+            ? `档案查询失败：${profileError}`
+            : profileChecked
+              ? `该 SN 未在档案库登记（共 ${profileTotal ?? 0} 台）`
+              : `未连接设备 · 档案库共 ${profileTotal ?? 0} 台`
+        }}
+      </p>
+    </section>
+
     <!-- 环境参数 -->
     <section class="status-group">
       <h4>环境参数</h4>
@@ -622,6 +686,26 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
   text-transform: none;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* 档案值可能很长（维修记录等）：单行省略，完整内容看 tooltip */
+.profile-value {
+  max-width: 62%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.profile-tip {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  word-break: break-all;
+}
+
+.profile-tip.error {
+  color: var(--danger, #dc2626);
 }
 
 .status-group h4::after {

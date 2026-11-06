@@ -228,6 +228,14 @@ export interface SsdFile {
     size: number;
 }
 
+/** SSD 文件表扫描结果 */
+export interface SsdDirectoryInfo {
+    /** 有效文件列表 */
+    files: SsdFile[];
+    /** 数据区已分配到的末尾扇区（设备下一个文件从这里开始写） */
+    maxEnd: number;
+}
+
 /** SD 卡 GPS 文件（SFTP） */
 export interface SdFile {
     name: string;
@@ -302,4 +310,28 @@ export interface ReplayGps {
     azimuth: number;
     pitch: number;
     roll: number;
+}
+
+/** NocoDB 表字段（动态表单） */
+export interface NocoColumn {
+    /** 列标题，同时作为写入记录的 key */
+    title: string;
+    /** NocoDB 字段类型：SingleLineText / LongText / Number / SingleSelect ... */
+    uidt: string;
+    /** 是否必填 */
+    required: boolean;
+    /** 单选/多选可选值 */
+    options: string[];
+    /** 关联字段指向的表 ID（仅 LinkToAnotherRecord 有值） */
+    relatedTableId?: string | null;
+}
+
+/** 一条设备档案（NocoDB 行） */
+export interface NocoRecord {
+    /** NocoDB 行 ID */
+    id: number;
+    /** 各字段值（已剔除系统列） */
+    values: Record<string, unknown>;
+    /** 最后更新时间 */
+    updatedAt: string | null;
 }

@@ -13,6 +13,7 @@ mod laser;
 mod laser_5khz;
 mod motor;
 mod network;
+mod nocodb;
 mod pointcloud;
 mod preview;
 mod protocol;
@@ -209,6 +210,9 @@ pub fn run() {
             commands::read_replay_frame,
             commands::close_replay_file,
             commands::build_point_cloud,
+            nocodb::nocodb_columns,
+            nocodb::nocodb_list,
+            nocodb::nocodb_find_by_sn,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

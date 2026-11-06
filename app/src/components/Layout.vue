@@ -23,6 +23,8 @@ const PointCloudView = defineAsyncComponent(() => import("./PointCloudView.vue")
 import { useReplay } from "../composables/useReplay";
 import { usePointCloud } from "../composables/usePointCloud";
 import { useLocalEndpoint } from "../composables/useLocalEndpoint";
+import { useDeviceProfiles } from "../composables/useDeviceProfiles";
+import DeviceProfileDialog from "./DeviceProfileDialog.vue";
 import { measureTargetDistance } from "../utils/targetDistance";
 import type { TargetMeasurement } from "../utils/targetDistance";
 import { ConnectionState } from "../types";
@@ -47,6 +49,28 @@ const {
 } = useSystemStatus();
 
 const toast = useToast();
+
+// 设备档案（NocoDB）：按 SN 自动匹配
+const profileDialogVisible = ref(false);
+const {
+  current: deviceProfile,
+  currentChecked: deviceProfileChecked,
+  currentError: deviceProfileError,
+  records: profileRecords,
+  loadRecords: loadProfiles,
+  setCurrentSn,
+} = useDeviceProfiles();
+
+// 启动时拉一次档案列表，未连接设备时也能看到档案库数量
+onMounted(() => {
+  void loadProfiles();
+});
+
+watch(
+  () => status.value?.device_sn,
+  (sn) => setCurrentSn(sn ?? ""),
+  { immediate: true }
+);
 
 // 本机网络端点：连接异常时显示，便于排查本机 IP 配置
 const {
@@ -463,6 +487,7 @@ handleSearch();
           @passthrough="showPassthrough = true"
           @replay="toggleReplay"
           @cloud="toggleCloud"
+          @profile="profileDialogVisible = true"
         />
       </div>
 
@@ -590,7 +615,15 @@ handleSearch();
           </span>
         </div>
         <div class="panel-body">
-          <StatusPanel :status="status" :preview-sub-time="previewSubTime" :gps-override="replayGps" />
+          <StatusPanel
+            :status="status"
+            :preview-sub-time="previewSubTime"
+            :gps-override="replayGps"
+            :profile="deviceProfile"
+            :profile-checked="deviceProfileChecked"
+            :profile-error="deviceProfileError"
+            :profile-total="profileRecords.length"
+          />
         </div>
       </aside>
     </div>
@@ -601,6 +634,12 @@ handleSearch();
       :visible="showDeviceSelector"
       @select="handleSelectDevice"
       @cancel="showDeviceSelector = false"
+    />
+
+    <!-- 设备档案（NocoDB 动态字段） -->
+    <DeviceProfileDialog
+      v-model:visible="profileDialogVisible"
+      :initial-sn="status?.device_sn ?? ''"
     />
 
     <!-- 触发方式说明（状态面板 / 控制面板共用） -->

@@ -17,7 +17,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-    (e: "replay" | "cloud" | "wizard" | "passthrough"): void;
+    (e: "replay" | "cloud" | "wizard" | "passthrough" | "profile"): void;
 }>();
 
 const rootRef = ref<HTMLDivElement | null>(null);
@@ -79,7 +79,7 @@ function toggleMenu() {
 }
 
 /** 菜单项点击：先收起菜单，再执行对应操作 */
-function choose(action: "replay" | "cloud" | "wizard" | "passthrough") {
+function choose(action: "replay" | "cloud" | "wizard" | "passthrough" | "profile") {
     menuOpen.value = false;
     emit(action);
 }
@@ -170,6 +170,18 @@ onUnmounted(() => {
         </svg>
         <span>{{ props.replayActive ? "退出离线回放" : "离线回放" }}</span>
         <span v-if="props.replayActive" class="menu-dot"></span>
+      </button>
+
+      <button
+        class="menu-item"
+        @click="choose('profile')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 5h16v14H4z" />
+          <path d="M8 9h8M8 13h5" />
+        </svg>
+        <span>设备档案</span>
       </button>
 
       <button
