@@ -9,7 +9,7 @@ import CaptureParamsDialog from "../CaptureParamsDialog.vue";
 const props = defineProps<{
   connected: boolean;
   deviceIp?: string;
-  /** 设备状态中的信号采集模式（0 内触发 / 1 外触发 / 2 PIN 触发） */
+  /** 设备状态中的信号采集模式（0 内触发 / 1 外触发 / 2 主波触发） */
   deviceMode?: number;
 }>();
 
@@ -133,7 +133,7 @@ const trgMode = ref(0);
 const trigModes = [
   { value: 0, label: "内触发" },
   { value: 1, label: "外触发" },
-  { value: 2, label: "PIN触发" },
+  { value: 2, label: "主波触发" },
 ];
 
 /** 设备状态更新后同步界面选项；仅在程序赋值时生效，不会触发下发 */

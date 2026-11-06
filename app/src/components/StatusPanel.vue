@@ -298,7 +298,7 @@ const sys0Flags = computed(() => {
 function trgModeLabel(v: number | undefined): string {
   if (v === 1) return "外触发";
   if (v === 0) return "内触发";
-  if (v === 2) return "PIN 触发";
+  if (v === 2) return "主波触发";
   return "-";
 }
 

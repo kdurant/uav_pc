@@ -670,7 +670,7 @@ pub fn set_preview_refresh_ms(ms: u64) -> Result<(), String> {
 
 /// 设置信号采集模式（0x0f03）。
 ///
-/// PIN 触发（mode=2）时，先用 0x0321 下发 pin 通道触发阈值，
+/// 主波触发（mode=2）时，先用 0x0321 下发 pin 通道触发阈值，
 /// 阈值取自 config.toml 的 `[capture].pin_threshold`。
 #[tauri::command]
 pub async fn set_trg_mode(
@@ -695,7 +695,7 @@ pub async fn set_trg_mode(
             pin_threshold.to_be_bytes().to_vec(),
         )
         .await?;
-        log::info!("PIN 触发阈值已下发: {}", pin_threshold);
+        log::info!("主波触发阈值已下发: {}", pin_threshold);
     }
 
     send_frame(

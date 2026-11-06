@@ -3,11 +3,11 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useTriggerHelp } from "../composables/useTriggerHelp";
 
 const props = defineProps<{
-  /** 设备当前模式：0 内触发 / 1 外触发 / 2 PIN 触发 */
+  /** 设备当前模式：0 内触发 / 1 外触发 / 2 主波触发 */
   deviceMode?: number;
-  /** 和阈值（PIN 触发用） */
+  /** 和阈值（主波触发用） */
   sumLevel?: number;
-  /** 值阈值（PIN 触发用） */
+  /** 值阈值（主波触发用） */
   minLevel?: number;
 }>();
 
@@ -16,10 +16,10 @@ const { visible, activeMode, close } = useTriggerHelp();
 const TABS = [
   { mode: 0, label: "内触发", badge: "卡内" },
   { mode: 1, label: "外触发", badge: "卡外" },
-  { mode: 2, label: "PIN 触发", badge: "数据流" },
+  { mode: 2, label: "主波触发", badge: "数据流" },
 ];
 
-const MODE_LABELS = ["内触发", "外触发", "PIN 触发"];
+const MODE_LABELS = ["内触发", "外触发", "主波触发"];
 
 /** 当前查看的 tab，打开时同步为设备实际模式 */
 const active = ref(0);
@@ -232,7 +232,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
               </circle>
             </g>
 
-            <!-- ===== PIN 触发 ===== -->
+            <!-- ===== 主波触发 ===== -->
             <g v-else>
               <g transform="translate(305 0)" clip-path="url(#wave-viewport)">
                 <g class="wave-scroll">
