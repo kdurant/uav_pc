@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { ReplayGps, SystemStatus, TemperatureConfig, TemperaturePoint } from "../types";
+import type {
+  NocoRecord,
+  ReplayGps,
+  SystemStatus,
+  TemperatureConfig,
+  TemperaturePoint,
+} from "../types";
 import TemperatureHistoryDialog from "./TemperatureHistoryDialog.vue";
 import AttitudeView from "./AttitudeView.vue";
 import { useToast } from "../composables/useToast";
 import { useTriggerHelp } from "../composables/useTriggerHelp";
+import { useSsdUsage } from "../composables/useSsdUsage";
 
 const props = defineProps<{
   status: SystemStatus | null;
@@ -132,6 +139,32 @@ function formatDiskSize(sectors: number | undefined): string {
   const bytes = sectors * 512;
   return (bytes / 1024 ** 3).toFixed(2) + " GB";
 }
+
+/** 字节数格式化为易读单位 */
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return (bytes / 1024 ** 3).toFixed(2) + " GB";
+  if (bytes >= 1024 ** 2) return (bytes / 1024 ** 2).toFixed(1) + " MB";
+  if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return bytes + " B";
+}
+
+// ===== SSD 剩余容量（检索文件后才有占用数据） =====
+const { usedBytes: ssdUsedBytes, fileCount: ssdFileCount, known: ssdUsageKnown } = useSsdUsage();
+
+const diskTotalBytes = computed(() => (props.status?.sata_dev_tot_sec_num ?? 0) * 512);
+const diskFreeBytes = computed(() => Math.max(0, diskTotalBytes.value - ssdUsedBytes.value));
+
+/** 硬盘容量行：检索过文件后追加剩余容量 */
+const diskText = computed(() => {
+  const total = formatDiskSize(props.status?.sata_dev_tot_sec_num);
+  if (!ssdUsageKnown.value || diskTotalBytes.value <= 0) return total;
+  return `${total} · 剩余 ${formatBytes(diskFreeBytes.value)}`;
+});
+
+const diskTitle = computed(() => {
+  if (!ssdUsageKnown.value) return "检索 SSD 文件后显示剩余容量";
+  return `数据区已分配至 ${formatBytes(ssdUsedBytes.value)} · ${ssdFileCount.value} 个文件`;
+});
 
 /** 固定小数位，无数据时显示 "-" */
 function fmtFixed(v: number | undefined, digits: number): string {
@@ -462,7 +495,7 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
         </div>
         <div class="status-row">
           <span class="label">硬盘容量</span>
-          <span class="value mono">{{ formatDiskSize(s?.sata_dev_tot_sec_num) }}</span>
+          <span class="value mono" :title="diskTitle">{{ diskText }}</span>
         </div>
       </div>
     </section>

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   SdFile,
+  SsdDirectoryInfo,
   SsdDownloadProgress,
   SsdDownloadState,
   SsdFile,
@@ -12,6 +13,7 @@ import type {
 import StorageDrawer from "../StorageDrawer.vue";
 import ConfirmDialog from "../ConfirmDialog.vue";
 import { useToast } from "../../composables/useToast";
+import { useSsdUsage } from "../../composables/useSsdUsage";
 
 const props = defineProps<{
   connected: boolean;
@@ -78,6 +80,26 @@ async function toggleStore() {
 
 // ===== SSD 已存储文件检索 =====
 const ssdFiles = ref<SsdFile[]>([]);
+// 同步给设备状态面板，用于显示 SSD 剩余容量
+const {
+  maxEndSector: ssdMaxEnd,
+  known: ssdUsageKnown,
+  setFiles: setSsdUsage,
+  clear: clearSsdUsage,
+} = useSsdUsage();
+
+// 断开连接或切换设备后，上一台设备的 SSD 占用不再有效
+watch(
+  () => [props.connected, props.deviceIp] as const,
+  ([connected]) => {
+    if (!connected) clearSsdUsage();
+  }
+);
+watch(
+  () => props.deviceIp,
+  () => clearSsdUsage()
+);
+
 const ssdLoading = ref(false);
 const ssdError = ref("");
 const ssdDrawerVisible = ref(false);
@@ -129,11 +151,21 @@ const totalBytes = computed(() => {
   return st.sata_dev_tot_sec_num * 512;
 });
 
-/** SSD 剩余容量（字节）：总扇区数 − 当前写入扇区 */
+/**
+ * SSD 剩余容量（字节）。
+ *
+ * 优先用文件表里数据区的末尾扇区（max_end）计算：设备新文件总是从 max_end 继续写，
+ * 删除文件留下的空洞不会回收，所以「总容量 − max_end」才是真实可用空间。
+ * 未检索过文件表时退回到设备状态里的 sata_app_lba_next（设备重启后该值可能为 0，故仅作兜底）。
+ */
 const remainingBytes = computed(() => {
-  const st = props.status;
   const total = totalBytes.value;
-  if (!st || total === null) return null;
+  if (total === null) return null;
+  if (ssdUsageKnown.value && ssdMaxEnd.value > 0) {
+    return Math.max(0, total - ssdMaxEnd.value * 512);
+  }
+  const st = props.status;
+  if (!st) return null;
   const used = Math.min(Math.max(st.sata_app_lba_next, 0), st.sata_dev_tot_sec_num);
   return (st.sata_dev_tot_sec_num - used) * 512;
 });
@@ -313,9 +345,11 @@ async function loadSsdFiles(openDrawer: boolean) {
   ssdLoading.value = true;
   ssdError.value = "";
   try {
-    ssdFiles.value = await invoke<SsdFile[]>("list_ssd_files", {
+    const dir = await invoke<SsdDirectoryInfo>("list_ssd_files", {
       deviceIp: props.deviceIp,
     });
+    ssdFiles.value = dir.files;
+    setSsdUsage(dir.files, dir.maxEnd);
   } catch (e) {
     ssdError.value = String(e);
     console.error("list_ssd_files failed:", e);
@@ -542,9 +576,12 @@ async function doDeleteAllGpsFiles() {
           <span class="estimate-value">{{ storageRateMbps.toFixed(2) }} MB/s</span>
         </div>
         <div class="estimate-row">
-          <span class="estimate-label">磁盘容量</span>
-          <span class="estimate-value">
-            {{ formatSize(remainingBytes ?? 0) }} / {{ formatSize(totalBytes ?? 0) }} 可用
+          <span class="estimate-label">剩余容量</span>
+          <span
+            class="estimate-value"
+            :title="`总容量 ${formatSize(totalBytes ?? 0)}`"
+          >
+            {{ remainingBytes === null ? "-" : formatSize(remainingBytes) }}
           </span>
         </div>
         <div class="estimate-row">

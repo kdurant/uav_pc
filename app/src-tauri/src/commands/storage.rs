@@ -173,9 +173,22 @@ async fn scan_ssd_directory(
     })
 }
 
+/// SSD 文件表扫描结果（返回给前端）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SsdDirectoryInfo {
+    /// 有效文件列表
+    pub files: Vec<SsdFile>,
+    /// 数据区已分配到的末尾扇区（设备下一个文件从这里开始写）
+    pub max_end: u64,
+}
+
 /// 检索 SSD 已存储文件：逐条目读取文件表（0x0400），返回文件名/起始/结束/大小
 #[tauri::command]
-pub async fn list_ssd_files(app: AppHandle, device_ip: String) -> Result<Vec<SsdFile>, String> {
+pub async fn list_ssd_files(
+    app: AppHandle,
+    device_ip: String,
+) -> Result<SsdDirectoryInfo, String> {
     let _ssd = acquire_ssd_lock(&app).await;
     let network = get_or_init_network(&app).await?;
 
@@ -192,8 +205,16 @@ pub async fn list_ssd_files(app: AppHandle, device_ip: String) -> Result<Vec<Ssd
     };
 
     let dir = scan_ssd_directory(&network, &target, &mut rx).await?;
-    log::info!("Listed {} SSD file(s) from {}", dir.files.len(), device_ip);
-    Ok(dir.files)
+    log::info!(
+        "Listed {} SSD file(s) from {}, data end LBA {}",
+        dir.files.len(),
+        device_ip,
+        dir.max_end
+    );
+    Ok(SsdDirectoryInfo {
+        files: dir.files,
+        max_end: dir.max_end,
+    })
 }
 
 /// 开始/停止 SSD 存储。
