@@ -84,9 +84,10 @@ function choose(action: "replay" | "cloud" | "wizard" | "passthrough" | "profile
     emit(action);
 }
 
-/** 点击组件之外关闭菜单 */
+/** 点击组件之外关闭菜单（仅左键；右键/中键不关闭，避免误触） */
 function onDocumentPointerDown(event: PointerEvent) {
     if (!menuOpen.value) return;
+    if (event.button !== 0) return;
     const root = rootRef.value;
     if (root && !root.contains(event.target as Node)) menuOpen.value = false;
 }

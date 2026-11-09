@@ -135,7 +135,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 
 <template>
   <Teleport to="body">
-    <div v-if="props.visible" class="modal-overlay" @click.self="close">
+    <div v-if="props.visible" class="modal-overlay">
       <div class="modal">
         <header class="modal-head">
           <div class="modal-title-wrap">

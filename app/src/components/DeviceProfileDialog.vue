@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
     useDeviceProfiles,
     LASER_TABLE_ID,
@@ -169,11 +169,20 @@ watch(
 function close() {
     emit("update:visible", false);
 }
+
+/** Esc 关闭（遮罩不再响应点击） */
+function onKeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape" || !props.visible) return;
+    close();
+}
+
+onMounted(() => window.addEventListener("keydown", onKeydown));
+onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="modal-overlay" @click.self="close">
+    <div v-if="visible" class="modal-overlay">
       <div class="modal">
         <header class="modal-head">
           <div class="modal-titles">
