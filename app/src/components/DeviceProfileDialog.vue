@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import {
-    useDeviceProfiles,
-    LASER_TABLE_ID,
-} from "../composables/useDeviceProfiles";
+import { useDeviceProfiles } from "../composables/useDeviceProfiles";
 import type { NocoColumn, NocoRecord } from "../types";
 
 /**
@@ -22,17 +19,7 @@ const emit = defineEmits<{
     (e: "update:visible", value: boolean): void;
 }>();
 
-const {
-    columns,
-    laserColumns,
-    motorColumns,
-    records,
-    lasers,
-    motors,
-    loading,
-    error,
-    loadRecords,
-} = useDeviceProfiles();
+const { columns, records, linkTables, loading, error, loadRecords } = useDeviceProfiles();
 
 const search = ref("");
 const selectedId = ref<number | null>(null);
@@ -57,11 +44,24 @@ function isCurrentRecord(record: NocoRecord): boolean {
     return !!currentSn.value && sn === currentSn.value;
 }
 
+/** 列表副标题：展示关联外设的名称，如「激光器 国产20k · 电机 epos2」 */
 function recordSubtitle(record: NocoRecord): string {
-    const other = columns.value.find((c) => c.title !== snColumn.value);
-    if (!other) return "";
-    const value = record.values[other.title];
-    return value === null || value === undefined ? "" : String(value);
+    const parts: string[] = [];
+    for (const col of columns.value) {
+        if (col.uidt !== "LinkToAnotherRecord") continue;
+        const raw = record.values[col.title];
+        if (!Array.isArray(raw)) continue;
+        const names = raw
+            .map((item) => {
+                const entry = Object.entries(item as Record<string, unknown>).find(
+                    ([key]) => key !== "Id"
+                );
+                return entry ? String(entry[1]) : "";
+            })
+            .filter((s) => s !== "");
+        if (names.length) parts.push(`${col.title} ${names.join("、")}`);
+    }
+    return parts.join(" · ");
 }
 
 function selectRecord(record: NocoRecord) {
@@ -119,13 +119,16 @@ const linkedGroups = computed<LinkedGroup[]>(() => {
                       .map((item) => Number((item as Record<string, unknown>)?.Id))
                       .filter((id) => Number.isFinite(id))
                 : [];
-            const isLaser = col.relatedTableId === LASER_TABLE_ID;
-            const pool = isLaser ? lasers.value : motors.value;
-            const cols = isLaser ? laserColumns.value : motorColumns.value;
-            const items = ids
-                .map((id) => pool.find((r) => r.id === id))
-                .filter((r): r is NocoRecord => !!r)
-                .map((r) => ({ id: r.id, fields: fieldsOf(r, cols) }));
+            // 关联表完全按字段指向的表 ID 解析，新增关联表无需改代码
+            const table = col.relatedTableId
+                ? linkTables.value[col.relatedTableId]
+                : undefined;
+            const items = table
+                ? ids
+                      .map((id) => table.records.find((r) => r.id === id))
+                      .filter((r): r is NocoRecord => !!r)
+                      .map((r) => ({ id: r.id, fields: fieldsOf(r, table.columns) }))
+                : [];
             return { title: col.title, items };
         });
 });

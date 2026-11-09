@@ -14,12 +14,8 @@ use std::time::Duration;
 const BASE_URL: &str = "http://47.96.101.118:8080";
 /// API Token（内部使用）
 const TOKEN: &str = "nc_pat_tZ3CoCt0tSQPtZaIeygSOpzCW7BBcetWkI4IxTCa";
-/// 设备信息表 ID
+/// 设备信息表 ID（仅用于识别 SN 过滤与默认查询）
 const DEVICES_TABLE: &str = "mibklfb9ybn96lx";
-/// 激光器表 ID
-const LASERS_TABLE: &str = "mmve483ctlcgjhu";
-/// 电机表 ID
-const MOTORS_TABLE: &str = "mexv8ok3duce7s0";
 /// 设备 SN 所在列（用于查询与去重）
 const SN_COLUMN: &str = "SN";
 /// 请求超时
@@ -55,16 +51,6 @@ pub struct NocoColumn {
     pub options: Vec<String>,
     /// 关联字段指向的表 ID（仅 LinkToAnotherRecord 有值）
     pub related_table_id: Option<String>,
-}
-
-/// 逻辑表名 → NocoDB 表 ID
-fn table_id(table: &str) -> Result<&'static str, String> {
-    match table {
-        "devices" => Ok(DEVICES_TABLE),
-        "lasers" => Ok(LASERS_TABLE),
-        "motors" => Ok(MOTORS_TABLE),
-        other => Err(format!("未知的数据表: {other}")),
-    }
 }
 
 /// NocoDB 自动生成的关联中间表列名，需要在结果里忽略
@@ -112,8 +98,7 @@ async fn parse_response(resp: reqwest::Response, action: &str) -> Result<Value, 
 /// 读取指定表的字段定义（忽略系统列与关联中间表列）
 #[tauri::command]
 pub async fn nocodb_columns(table: String) -> Result<Vec<NocoColumn>, String> {
-    let table_id = table_id(&table)?;
-    let url = format!("{BASE_URL}/api/v2/meta/tables/{table_id}");
+    let url = format!("{BASE_URL}/api/v2/meta/tables/{table}");
     let resp = client()?
         .get(url)
         .header("xc-token", TOKEN)
@@ -196,17 +181,17 @@ fn to_record(value: &Value) -> Option<NocoRecord> {
     })
 }
 
-/// 列出指定表的记录；devices 表支持按 SN 模糊搜索
+/// 列出指定表的记录；设备信息表支持按 SN 模糊搜索
 #[tauri::command]
 pub async fn nocodb_list(table: String, query: Option<String>) -> Result<Vec<NocoRecord>, String> {
-    let table_id = table_id(&table)?;
-    let url = format!("{BASE_URL}/api/v2/tables/{table_id}/records");
+    let is_devices = table == DEVICES_TABLE;
+    let url = format!("{BASE_URL}/api/v2/tables/{table}/records");
     let mut req = client()?
         .get(url)
         .header("xc-token", TOKEN)
         .query(&[("limit", PAGE_SIZE.to_string())]);
 
-    if table == "devices" {
+    if is_devices {
         if let Some(q) = query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
             req = req.query(&[("where", format!("({SN_COLUMN},like,%{q}%)"))]);
         }
@@ -223,7 +208,7 @@ pub async fn nocodb_list(table: String, query: Option<String>) -> Result<Vec<Noc
                 .filter_map(to_record)
                 // devices 表过滤掉手工新增的空行（SN 为空）
                 .filter(|r| {
-                    table != "devices"
+                    !is_devices
                         || r.values
                             .get(SN_COLUMN)
                             .and_then(|v| v.as_str())
@@ -245,7 +230,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_nocodb_readonly() {
-        let columns = nocodb_columns("devices".into()).await.expect("读取字段失败");
+        let columns = nocodb_columns(DEVICES_TABLE.into())
+            .await
+            .expect("读取字段失败");
         assert!(!columns.is_empty(), "表结构为空");
         eprintln!(
             "设备表字段: {:?}",
@@ -256,11 +243,19 @@ mod tests {
             "设备表应有激光器/电机关联字段"
         );
 
-        let lasers = nocodb_list("lasers".into(), None).await.expect("激光器列表失败");
-        let motors = nocodb_list("motors".into(), None).await.expect("电机列表失败");
-        eprintln!("激光器 {} 条 / 电机 {} 条", lasers.len(), motors.len());
+        // 逐个加载关联表，验证多关联（激光器/电机/增益/采集参数）
+        for col in columns.iter().filter(|c| c.uidt == "LinkToAnotherRecord") {
+            let Some(rel) = col.related_table_id.as_deref() else {
+                continue;
+            };
+            let rows = nocodb_list(rel.to_string(), None)
+                .await
+                .unwrap_or_else(|e| panic!("读取关联表 {rel} 失败: {e}"));
+            let _cols = nocodb_columns(rel.to_string()).await.expect("读取关联表字段失败");
+            eprintln!("关联字段「{}」 → {} 条记录", col.title, rows.len());
+        }
 
-        let list = nocodb_list("devices".into(), None).await.expect("列表失败");
+        let list = nocodb_list(DEVICES_TABLE.into(), None).await.expect("列表失败");
         eprintln!("记录数: {}", list.len());
         assert!(!list.is_empty(), "nocodb_list 返回空列表");
     }

@@ -1,70 +1,73 @@
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { NocoColumn, NocoRecord } from "../types";
 
 /**
  * 设备档案（NocoDB）全局状态，只读。
  *
- * NocoDB 里是三张表：
- *   设备信息(SN) ── 关联 ──▶ 激光器 / 电机
- * 表结构由 NocoDB 决定，前端按字段动态展示；新增列无需改代码。
+ * NocoDB 里是「设备信息 + 若干关联表」的结构（激光器 / 电机 / 增益 / 采集参数 …），
+ * 关联关系完全由表结构决定：读取设备表的字段后，按关联字段指向的表动态加载，
+ * 因此后续新增关联表或字段都不需要改代码。
  */
 
-/** 数据表 ID（与 Rust 端常量保持一致） */
-export const LASER_TABLE_ID = "mmve483ctlcgjhu";
-export const MOTOR_TABLE_ID = "mexv8ok3duce7s0";
+/** 设备信息表 ID（与 Rust 端常量保持一致） */
+export const DEVICES_TABLE_ID = "mibklfb9ybn96lx";
+
+/** 关联表数据：字段定义 + 记录 */
+export interface LinkTable {
+    columns: NocoColumn[];
+    records: NocoRecord[];
+}
 
 const columns = ref<NocoColumn[]>([]);
-const laserColumns = ref<NocoColumn[]>([]);
-const motorColumns = ref<NocoColumn[]>([]);
-
 const records = ref<NocoRecord[]>([]);
-const lasers = ref<NocoRecord[]>([]);
-const motors = ref<NocoRecord[]>([]);
+/** 以表 ID 为键的关联表缓存 */
+const linkTables = ref<Record<string, LinkTable>>({});
 
 const loading = ref(false);
 const error = ref("");
-
-async function loadSchema(
-    table: string,
-    target: typeof columns,
-    force: boolean
-): Promise<void> {
-    if (!force && target.value.length) return;
-    target.value = await invoke<NocoColumn[]>("nocodb_columns", { table });
-}
-
-async function loadPools(): Promise<void> {
-    const [l, m] = await Promise.all([
-        invoke<NocoRecord[]>("nocodb_list", { table: "lasers", query: null }),
-        invoke<NocoRecord[]>("nocodb_list", { table: "motors", query: null }),
-    ]);
-    lasers.value = l;
-    motors.value = m;
-}
 
 async function loadRecords(query?: string, refreshColumns = false): Promise<void> {
     loading.value = true;
     error.value = "";
     try {
-        // refreshColumns=true 时重新读取表结构，NocoDB 新增列后无需重启
-        await Promise.all([
-            loadSchema("devices", columns, refreshColumns),
-            loadSchema("lasers", laserColumns, refreshColumns),
-            loadSchema("motors", motorColumns, refreshColumns),
-        ]);
+        // 设备表结构：首次加载或手动刷新时读取
+        if (refreshColumns || !columns.value.length) {
+            columns.value = await invoke<NocoColumn[]>("nocodb_columns", {
+                table: DEVICES_TABLE_ID,
+            });
+        }
+
+        // 关联字段指向的表（去重）
+        const relatedIds = Array.from(
+            new Set(
+                columns.value
+                    .filter((c) => c.uidt === "LinkToAnotherRecord" && c.relatedTableId)
+                    .map((c) => c.relatedTableId as string)
+            )
+        );
+
+        // 关联表的记录每次都重新拉取，表结构可复用缓存
+        const nextTables: Record<string, LinkTable> = {};
+        await Promise.all(
+            relatedIds.map(async (tableId) => {
+                const cached = linkTables.value[tableId];
+                const [cols, rows] = await Promise.all([
+                    cached && !refreshColumns
+                        ? Promise.resolve(cached.columns)
+                        : invoke<NocoColumn[]>("nocodb_columns", { table: tableId }),
+                    invoke<NocoRecord[]>("nocodb_list", { table: tableId, query: null }),
+                ]);
+                nextTables[tableId] = { columns: cols, records: rows };
+            })
+        );
+        linkTables.value = nextTables;
+
         const q = query?.trim();
-        const [devices, laserList, motorList] = await Promise.all([
-            invoke<NocoRecord[]>("nocodb_list", {
-                table: "devices",
-                query: q ? q : null,
-            }),
-            invoke<NocoRecord[]>("nocodb_list", { table: "lasers", query: null }),
-            invoke<NocoRecord[]>("nocodb_list", { table: "motors", query: null }),
-        ]);
-        records.value = devices;
-        lasers.value = laserList;
-        motors.value = motorList;
+        records.value = await invoke<NocoRecord[]>("nocodb_list", {
+            table: DEVICES_TABLE_ID,
+            query: q ? q : null,
+        });
     } catch (e) {
         console.error("nocodb load failed:", e);
         error.value = String(e);
@@ -77,11 +80,8 @@ async function loadRecords(query?: string, refreshColumns = false): Promise<void
 export function useDeviceProfiles() {
     return {
         columns,
-        laserColumns,
-        motorColumns,
         records,
-        lasers,
-        motors,
+        linkTables,
         loading,
         error,
         loadRecords,
