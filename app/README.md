@@ -42,47 +42,42 @@ cd src-tauri && cargo test
 
 ## 配置文件
 
-应用根目录的 `config.toml`：
+| 文件 | 说明 |
+|---|---|
+| `config.toml` | 默认完整配置，与可执行文件同目录；首次运行不存在时自动生成 |
+| `config_<SN>.toml` | 设备专用配置，保存完整配置，例如 `config_SN_260601ALCN.toml` |
 
-```toml
-[basic]
-local_ip = "192.168.93.44"
-local_port = 12345
-remote_port = 6666
-broadcast_search = true
-device_ip = ""
+启动时固定加载 `config.toml`；连接设备并获取 `device_sn` 后，按以下逻辑决定是否切换到设备专用配置：
 
-[radar]
-display_name = "5K 雷达"
-laser_type = "laser_connet"
-laser_info = ""
+```mermaid
+flowchart TD
+    A[启动应用] --> B[加载 config.toml]
+    B --> C[连接设备]
+    C --> D{获取到 device_sn}
+    D -->|否| B
+    D -->|是| E{本地存在 config_SN.toml}
+    E -->|是| F[先加载本地专用配置]
+    F --> Q{网络正常且服务器配置有变化}
+    Q -->|否| P2[继续使用本地配置]
+    Q -->|是| R[弹窗询问是否更新]
+    R -->|取消| P2
+    R -->|确认| K[下载并更新 config_SN.toml]
+    E -->|否| G{能访问 NocoDB}
+    G -->|否| H[保持 config.toml]
+    G -->|是| I{NocoDB 有该 SN 的配置}
+    I -->|否| H
+    I -->|是| J[弹窗询问是否下载]
+    J -->|取消| H
+    J -->|确认| K
+    K --> L[应用更新后的配置]
+    L --> M[更新界面输入值, 不自动下发设备]
+    M --> N{网络参数是否变化}
+    N -->|是| O[提示重启后生效]
+    N -->|否| P[立即生效]
 ```
 
-- `display_name`：上位机顶部显示的雷达名称
-- `laser_type`：激光器通信协议，当前支持 `laser_connet` / `laser_5kHz`
-- `laser_info`：自定义激光器信息（预留字段，当前不在界面显示）
-- `local_ip`：本机 IP 地址，用于 UDP 绑定和设备发现
-- `local_port`：UDP 端口号
-- `remote_port`：设备端 UDP 端口号
-- `broadcast_search`：`true` 通过 UDP 广播搜索局域网设备；`false` 跳过广播，直接使用 `device_ip` 通信（默认 `true`）
-- `device_ip`：`broadcast_search = false` 时使用的设备 IP 地址
-
-温度历史配置：
-
-```toml
-[ssd]
-chunk_mb = 1
-
-[temperature]
-save_points = 180
-display_points = 180
-```
-
-- `chunk_mb`：SSD 文件 TCP 下载分块大小（MB），仅支持 1、2、4，修改后需重启
-- `save_points`：历史温度文件最多保存的点数（每 10 秒一点，180 点约 30 分钟）
-- `display_points`：温度曲线最多显示的点数
-
-历史数据保存在可执行文件同目录的 `temperature_history.json`，启动时自动加载；`config.toml` 也位于同一目录（首次运行不存在时自动生成）。
+- 加载或下载配置后只更新界面输入值，不会自动下发到设备。
+- `[basic]` 中本机 IP / 端口变化时，需要重启应用后生效。
 
 ## 项目结构
 
