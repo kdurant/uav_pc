@@ -23,7 +23,6 @@ const PointCloudView = defineAsyncComponent(() => import("./PointCloudView.vue")
 import { useReplay } from "../composables/useReplay";
 import { usePointCloud } from "../composables/usePointCloud";
 import { useLocalEndpoint } from "../composables/useLocalEndpoint";
-import { useDeviceProfiles } from "../composables/useDeviceProfiles";
 import DeviceProfileDialog from "./DeviceProfileDialog.vue";
 import { measureTargetDistance } from "../utils/targetDistance";
 import type { TargetMeasurement } from "../utils/targetDistance";
@@ -50,27 +49,8 @@ const {
 
 const toast = useToast();
 
-// 设备档案（NocoDB）：按 SN 自动匹配
+// 设备档案（NocoDB）：调试菜单打开只读弹窗
 const profileDialogVisible = ref(false);
-const {
-  current: deviceProfile,
-  currentChecked: deviceProfileChecked,
-  currentError: deviceProfileError,
-  records: profileRecords,
-  loadRecords: loadProfiles,
-  setCurrentSn,
-} = useDeviceProfiles();
-
-// 启动时拉一次档案列表，未连接设备时也能看到档案库数量
-onMounted(() => {
-  void loadProfiles();
-});
-
-watch(
-  () => status.value?.device_sn,
-  (sn) => setCurrentSn(sn ?? ""),
-  { immediate: true }
-);
 
 // 本机网络端点：连接异常时显示，便于排查本机 IP 配置
 const {
@@ -281,7 +261,7 @@ const statusLabel = computed(() => {
     case ConnectionState.Connecting:
       return `连接中: ${selectedDevice.value?.ip ?? ""}`;
     case ConnectionState.Connected:
-      return `已连接: ${selectedDevice.value?.ip ?? ""}`;
+      return `已连接`;
     default:
       return "未连接";
   }
@@ -572,7 +552,7 @@ handleSearch();
                   ? `点云地形 · ${cloudData ? cloudData.pointCount.toLocaleString("zh-CN") + " 点" : "未生成"}`
                   : replayActive
                     ? `离线回放 · ${replayInfo ? replayInfo.frame_count.toLocaleString("zh-CN") + " 帧" : "未选择文件"}`
-                    : "实时波形 · 4 CH"
+                    : "实时波形 "
               }}
             </span>
             <span
@@ -619,10 +599,6 @@ handleSearch();
             :status="status"
             :preview-sub-time="previewSubTime"
             :gps-override="replayGps"
-            :profile="deviceProfile"
-            :profile-checked="deviceProfileChecked"
-            :profile-error="deviceProfileError"
-            :profile-total="profileRecords.length"
           />
         </div>
       </aside>

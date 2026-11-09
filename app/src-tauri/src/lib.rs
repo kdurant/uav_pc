@@ -212,7 +212,6 @@ pub fn run() {
             commands::build_point_cloud,
             nocodb::nocodb_columns,
             nocodb::nocodb_list,
-            nocodb::nocodb_find_by_sn,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

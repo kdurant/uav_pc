@@ -237,33 +237,6 @@ pub async fn nocodb_list(table: String, query: Option<String>) -> Result<Vec<Noc
     Ok(records)
 }
 
-/// 按 SN 精确查找一条档案（连接设备后自动关联用）
-#[tauri::command]
-pub async fn nocodb_find_by_sn(sn: String) -> Result<Option<NocoRecord>, String> {
-    let sn = sn.trim().to_string();
-    if sn.is_empty() {
-        return Ok(None);
-    }
-
-    let url = format!("{BASE_URL}/api/v2/tables/{DEVICES_TABLE}/records");
-    let resp = client()?
-        .get(url)
-        .header("xc-token", TOKEN)
-        .query(&[
-            ("where", format!("({SN_COLUMN},eq,{sn})")),
-            ("limit", "10".to_string()),
-        ])
-        .send()
-        .await
-        .map_err(|e| format!("查询设备档案失败: {e}"))?;
-    let body = parse_response(resp, "查询设备档案").await?;
-
-    Ok(body
-        .get("list")
-        .and_then(|v| v.as_array())
-        .and_then(|list| list.iter().filter_map(to_record).next()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,18 +263,5 @@ mod tests {
         let list = nocodb_list("devices".into(), None).await.expect("列表失败");
         eprintln!("记录数: {}", list.len());
         assert!(!list.is_empty(), "nocodb_list 返回空列表");
-
-        let sn = list[0]
-            .values
-            .get("SN")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let found = nocodb_find_by_sn(sn.clone())
-            .await
-            .expect("按 SN 查询失败")
-            .expect("按 SN 查不到刚列出的记录");
-        assert_eq!(found.id, list[0].id);
-        eprintln!("按 SN 匹配成功: {} -> Id {}", sn, found.id);
     }
 }

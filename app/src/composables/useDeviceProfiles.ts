@@ -25,15 +25,6 @@ const motors = ref<NocoRecord[]>([]);
 const loading = ref(false);
 const error = ref("");
 
-/** 连接设备后自动匹配到的档案 */
-const current = ref<NocoRecord | null>(null);
-/** 当前设备 SN */
-const currentSn = ref("");
-/** 是否已尝试过匹配 */
-const currentChecked = ref(false);
-/** 匹配失败原因（网络/服务端错误） */
-const currentError = ref("");
-
 async function loadSchema(
     table: string,
     target: typeof columns,
@@ -83,82 +74,6 @@ async function loadRecords(query?: string, refreshColumns = false): Promise<void
     }
 }
 
-async function findBySn(sn: string): Promise<NocoRecord | null> {
-    const value = sn.trim();
-    if (!value) return null;
-    return invoke<NocoRecord | null>("nocodb_find_by_sn", { sn: value });
-}
-
-/** 连接设备后调用：按 SN 匹配档案（失败不影响采集） */
-async function refreshCurrent(): Promise<void> {
-    const sn = currentSn.value.trim();
-    if (!sn) {
-        current.value = null;
-        currentChecked.value = false;
-        return;
-    }
-    currentError.value = "";
-    try {
-        current.value = await findBySn(sn);
-        // 关联表数据用于展示激光器/电机详情
-        if (current.value) {
-            await Promise.all([
-                loadSchema("lasers", laserColumns, false),
-                loadSchema("motors", motorColumns, false),
-            ]);
-            await loadPools();
-        }
-    } catch (e) {
-        console.error("nocodb_find_by_sn failed:", e);
-        current.value = null;
-        currentError.value = String(e);
-    } finally {
-        currentChecked.value = true;
-    }
-}
-
-function setCurrentSn(sn: string) {
-    const value = (sn ?? "").trim();
-    if (value === currentSn.value) return;
-    currentSn.value = value;
-    current.value = null;
-    currentError.value = "";
-    currentChecked.value = false;
-    if (value) void refreshCurrent();
-}
-
-/** 档案里需要展示的普通字段（过滤空值、跳过关联字段） */
-const currentFields = computed(() => {
-    const record = current.value;
-    if (!record) return [] as Array<[string, string]>;
-    return Object.entries(record.values)
-        .filter(([, v]) => {
-            if (Array.isArray(v)) return false; // 关联字段单独处理
-            if (v === null || v === undefined) return false;
-            if (typeof v === "string") return v.trim() !== "";
-            return true;
-        })
-        .map(([k, v]) => [k, String(v)] as [string, string]);
-});
-
-/** 当前设备关联的激光器 / 电机名称（取自关联字段里的型号） */
-const currentLinks = computed(() => {
-    const record = current.value;
-    if (!record) return [] as Array<[string, string]>;
-    return Object.entries(record.values)
-        .filter(([, v]) => Array.isArray(v) && v.length > 0)
-        .map(([k, v]) => {
-            const names = (v as Array<Record<string, unknown>>)
-                .map((item) => {
-                    const entry = Object.entries(item).find(([key]) => key !== "Id");
-                    return entry ? String(entry[1]) : "";
-                })
-                .filter((s) => s !== "");
-            return [k, names.join("、")] as [string, string];
-        })
-        .filter(([, names]) => names !== "");
-});
-
 export function useDeviceProfiles() {
     return {
         columns,
@@ -169,15 +84,6 @@ export function useDeviceProfiles() {
         motors,
         loading,
         error,
-        current,
-        currentSn,
-        currentChecked,
-        currentError,
-        currentFields,
-        currentLinks,
         loadRecords,
-        findBySn,
-        refreshCurrent,
-        setCurrentSn,
     };
 }
