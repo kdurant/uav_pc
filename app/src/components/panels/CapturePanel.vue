@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useToast } from "../../composables/useToast";
 import { useTriggerHelp } from "../../composables/useTriggerHelp";
 import { useCaptureConfig } from "../../composables/useCaptureConfig";
@@ -32,7 +33,7 @@ const minLevel = ref(0);
 const settingInProgress = ref(false);
 
 // ===== 启动时从 config.toml [capture] 初始化参数 =====
-const { capture, load: loadCaptureConfig } = useCaptureConfig();
+const { capture, load: loadCaptureConfig, reload: reloadCaptureConfig } = useCaptureConfig();
 
 /**
  * 用配置文件初始化采集参数（仅填充界面，不自动下发）。
@@ -51,9 +52,19 @@ function applyCaptureConfig() {
   minLevel.value = c.max_value;
 }
 
+let unlistenConfig: (() => void) | null = null;
+
 onMounted(async () => {
   await loadCaptureConfig();
   applyCaptureConfig();
+  unlistenConfig = await listen("device-config-applied", () => {
+    void reloadCaptureConfig();
+  });
+});
+
+onUnmounted(() => {
+  unlistenConfig?.();
+  unlistenConfig = null;
 });
 
 // 设置界面保存后共享配置会被替换，这里同步刷新输入框

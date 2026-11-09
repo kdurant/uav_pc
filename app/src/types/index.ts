@@ -146,6 +146,26 @@ export interface AppConfig {
         /** 曲线最多显示点数 */
         display_points: number;
     };
+    laser: {
+        /** 激光器电流（mA） */
+        current_ma: number;
+        /** 触发/重频（Hz） */
+        freq_hz: number;
+    };
+    motor: {
+        /** 转速（rpm） */
+        speed_rpm: number;
+    };
+    gain: {
+        /** PMT0 电压（V） */
+        pmt0: number;
+        /** PMT1 电压（V） */
+        pmt1: number;
+        /** PMT2 电压（V） */
+        pmt2: number;
+        /** APD 高压（V） */
+        apd: number;
+    };
 }
 
 /** 保存配置的结果（对应 Rust SaveConfigResult） */

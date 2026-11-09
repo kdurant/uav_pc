@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { SystemStatus } from "../../types";
+import { listen } from "@tauri-apps/api/event";
+import type { AppConfig, SystemStatus } from "../../types";
 import { useToast } from "../../composables/useToast";
 
 const props = defineProps<{
@@ -16,6 +17,30 @@ const toast = useToast();
 const pmtVoltages = ref<number[]>([0, 0, 0]); // PMT0/PMT1/PMT2，0~5V
 const apdVoltage = ref(270); // APD 高压，范围 (140, 300) V
 const daSetting = ref<number | null>(null); // 正在下发的通道号，null 表示空闲
+
+/** 从配置初始化增益，设备专用配置应用后同步刷新 */
+function applyGainDefaults(cfg: AppConfig) {
+  pmtVoltages.value = [cfg.gain.pmt0, cfg.gain.pmt1, cfg.gain.pmt2];
+  apdVoltage.value = cfg.gain.apd;
+}
+
+let unlistenConfig: (() => void) | null = null;
+
+onMounted(async () => {
+  try {
+    applyGainDefaults(await invoke<AppConfig>("get_app_config"));
+  } catch (e) {
+    console.error("get_app_config failed:", e);
+  }
+  unlistenConfig = await listen<AppConfig>("device-config-applied", (event) => {
+    applyGainDefaults(event.payload);
+  });
+});
+
+onUnmounted(() => {
+  unlistenConfig?.();
+  unlistenConfig = null;
+});
 
 /** PMT 电压 → DA 数字值：65535 * V / 5（V ≤ 5） */
 function pmtToDigital(v: number): number {

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { LaserStatus } from "../../types";
+import { listen } from "@tauri-apps/api/event";
+import type { AppConfig, LaserStatus } from "../../types";
 import { useToast } from "../../composables/useToast";
 import { useRadarConfig } from "../../composables/useRadarConfig";
 
@@ -13,7 +14,30 @@ const props = defineProps<{
 const toast = useToast();
 const { laserType, load: loadRadarConfig } = useRadarConfig();
 
-onMounted(loadRadarConfig);
+/** 从配置初始化激光器电流/频率，设备专用配置应用后同步刷新 */
+function applyLaserDefaults(cfg: AppConfig) {
+  laserCurrent.value = cfg.laser.current_ma;
+  laserFreq.value = cfg.laser.freq_hz;
+}
+
+let unlistenConfig: (() => void) | null = null;
+
+onMounted(async () => {
+  loadRadarConfig();
+  try {
+    applyLaserDefaults(await invoke<AppConfig>("get_app_config"));
+  } catch (e) {
+    console.error("get_app_config failed:", e);
+  }
+  unlistenConfig = await listen<AppConfig>("device-config-applied", (event) => {
+    applyLaserDefaults(event.payload);
+  });
+});
+
+onUnmounted(() => {
+  unlistenConfig?.();
+  unlistenConfig = null;
+});
 
 /** 当前支持 laser_connet（含设备端旧写法）和 laser_5kHz */
 const laserSupported = computed(() =>

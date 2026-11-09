@@ -6,6 +6,7 @@
 //! 表结构是「一台设备一行」的扁平表，字段由 NocoDB 决定，前端通过
 //! `nocodb_columns` 动态渲染表单，所以新增列不需要改代码。
 
+use crate::config::AppConfig;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::time::Duration;
@@ -16,6 +17,11 @@ const BASE_URL: &str = "http://47.96.101.118:8080";
 const TOKEN: &str = "nc_pat_tZ3CoCt0tSQPtZaIeygSOpzCW7BBcetWkI4IxTCa";
 /// 设备信息表 ID（仅用于识别 SN 过滤与默认查询）
 const DEVICES_TABLE: &str = "mibklfb9ybn96lx";
+/// 设备关联的配置表
+const LASER_TABLE: &str = "mmve483ctlcgjhu";
+const MOTOR_TABLE: &str = "mexv8ok3duce7s0";
+const GAIN_TABLE: &str = "ms96qf581i1us8x";
+const CAPTURE_TABLE: &str = "mlpb8n3r84vrhid";
 /// 设备 SN 所在列（用于查询与去重）
 const SN_COLUMN: &str = "SN";
 /// 请求超时
@@ -222,6 +228,266 @@ pub async fn nocodb_list(table: String, query: Option<String>) -> Result<Vec<Noc
     Ok(records)
 }
 
+/// 从 NocoDB 映射出的设备参数
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RemoteDeviceParams {
+    pub laser_type: Option<String>,
+    pub laser_info: Option<String>,
+    pub laser_current_ma: Option<u32>,
+    pub laser_freq_hz: Option<u32>,
+    pub motor_speed_rpm: Option<u32>,
+    pub gain_pmt0: Option<f64>,
+    pub gain_pmt1: Option<f64>,
+    pub gain_pmt2: Option<f64>,
+    pub gain_apd: Option<f64>,
+    pub first_pos: Option<u32>,
+    pub first_len: Option<u32>,
+    pub second_pos: Option<u32>,
+    pub second_len: Option<u32>,
+    pub sum_value: Option<u32>,
+    pub max_value: Option<u32>,
+}
+
+impl RemoteDeviceParams {
+    /// 是否至少包含一个有效配置项
+    pub fn has_data(&self) -> bool {
+        self.laser_type.is_some()
+            || self.laser_current_ma.is_some()
+            || self.laser_freq_hz.is_some()
+            || self.motor_speed_rpm.is_some()
+            || self.gain_pmt0.is_some()
+            || self.gain_apd.is_some()
+            || self.first_pos.is_some()
+            || self.first_len.is_some()
+            || self.second_pos.is_some()
+            || self.second_len.is_some()
+            || self.sum_value.is_some()
+            || self.max_value.is_some()
+    }
+
+    /// 与本地配置比较，判断服务器参数是否发生变化。
+    ///
+    /// 仅比较服务器实际提供的字段，未提供的字段视为不变化。
+    pub fn differs_from(&self, cfg: &AppConfig) -> bool {
+        self.laser_type
+            .as_deref()
+            .map(|v| v != cfg.radar.laser_type)
+            .unwrap_or(false)
+            || self
+                .laser_info
+                .as_deref()
+                .map(|v| v != cfg.radar.laser_info)
+                .unwrap_or(false)
+            || self
+                .laser_current_ma
+                .map(|v| v != cfg.laser.current_ma)
+                .unwrap_or(false)
+            || self
+                .laser_freq_hz
+                .map(|v| v != cfg.laser.freq_hz)
+                .unwrap_or(false)
+            || self
+                .motor_speed_rpm
+                .map(|v| v != cfg.motor.speed_rpm)
+                .unwrap_or(false)
+            || self
+                .gain_pmt0
+                .map(|v| v != cfg.gain.pmt0)
+                .unwrap_or(false)
+            || self
+                .gain_pmt1
+                .map(|v| v != cfg.gain.pmt1)
+                .unwrap_or(false)
+            || self
+                .gain_pmt2
+                .map(|v| v != cfg.gain.pmt2)
+                .unwrap_or(false)
+            || self.gain_apd.map(|v| v != cfg.gain.apd).unwrap_or(false)
+            || self
+                .first_pos
+                .map(|v| v != cfg.capture.first_pos)
+                .unwrap_or(false)
+            || self
+                .first_len
+                .map(|v| v != cfg.capture.first_len)
+                .unwrap_or(false)
+            || self
+                .second_pos
+                .map(|v| v != cfg.capture.second_pos)
+                .unwrap_or(false)
+            || self
+                .second_len
+                .map(|v| v != cfg.capture.second_len)
+                .unwrap_or(false)
+            || self
+                .sum_value
+                .map(|v| v != cfg.capture.sum_value)
+                .unwrap_or(false)
+            || self
+                .max_value
+                .map(|v| v != cfg.capture.max_value)
+                .unwrap_or(false)
+    }
+
+    /// 覆盖到完整配置上，未提供的字段保持原值
+    pub fn apply_to(&self, mut cfg: AppConfig) -> AppConfig {
+        if let Some(v) = &self.laser_type {
+            cfg.radar.laser_type = v.clone();
+        }
+        if let Some(v) = &self.laser_info {
+            cfg.radar.laser_info = v.clone();
+        }
+        if let Some(v) = self.laser_current_ma {
+            cfg.laser.current_ma = v;
+        }
+        if let Some(v) = self.laser_freq_hz {
+            cfg.laser.freq_hz = v;
+        }
+        if let Some(v) = self.motor_speed_rpm {
+            cfg.motor.speed_rpm = v;
+        }
+        if let Some(v) = self.gain_pmt0 {
+            cfg.gain.pmt0 = v;
+        }
+        if let Some(v) = self.gain_pmt1 {
+            cfg.gain.pmt1 = v;
+        }
+        if let Some(v) = self.gain_pmt2 {
+            cfg.gain.pmt2 = v;
+        }
+        if let Some(v) = self.gain_apd {
+            cfg.gain.apd = v;
+        }
+        if let Some(v) = self.first_pos {
+            cfg.capture.first_pos = v;
+        }
+        if let Some(v) = self.first_len {
+            cfg.capture.first_len = v;
+        }
+        if let Some(v) = self.second_pos {
+            cfg.capture.second_pos = v;
+        }
+        if let Some(v) = self.second_len {
+            cfg.capture.second_len = v;
+        }
+        if let Some(v) = self.sum_value {
+            cfg.capture.sum_value = v;
+        }
+        if let Some(v) = self.max_value {
+            cfg.capture.max_value = v;
+        }
+        cfg
+    }
+}
+
+fn related_first<'a>(
+    values: &'a Map<String, Value>,
+    key: &str,
+) -> Option<&'a Map<String, Value>> {
+    values.get(key)?.as_array()?.first()?.as_object()
+}
+
+/// 关联字段里只返回了主显示列（如型号），需要按 Id 再查一次子表
+fn related_id(values: &Map<String, Value>, key: &str) -> Option<u64> {
+    related_first(values, key)?.get("Id")?.as_u64()
+}
+
+async fn fetch_related(table: &str, id: u64) -> Result<Option<Map<String, Value>>, String> {
+    let records = nocodb_list(table.to_string(), None).await?;
+    Ok(records
+        .into_iter()
+        .find(|r| r.id == id)
+        .map(|r| r.values))
+}
+
+fn as_u32(obj: &Map<String, Value>, key: &str) -> Option<u32> {
+    let v = obj.get(key)?;
+    v.as_u64()
+        .map(|n| n as u32)
+        .or_else(|| v.as_f64().map(|n| n as u32))
+}
+
+fn as_f64(obj: &Map<String, Value>, key: &str) -> Option<f64> {
+    let v = obj.get(key)?;
+    v.as_f64().or_else(|| v.as_u64().map(|n| n as f64))
+}
+
+fn as_text(obj: &Map<String, Value>, key: &str) -> Option<String> {
+    obj.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// NocoDB 中的激光器型号 → 上位机协议类型
+pub fn map_laser_type(model: &str) -> String {
+    if model.to_lowercase().contains("5k") {
+        "laser_5kHz".to_string()
+    } else {
+        "laser_connet".to_string()
+    }
+}
+
+/// 按 SN 从 NocoDB 读取设备参数。
+///
+/// 网络不可用时返回 Err；网络正常但找不到该 SN 时返回 Ok(None)。
+pub async fn fetch_device_params(sn: &str) -> Result<Option<RemoteDeviceParams>, String> {
+    let records = nocodb_list(DEVICES_TABLE.to_string(), Some(sn.to_string())).await?;
+    let Some(record) = records.into_iter().find(|r| {
+        r.values.get(SN_COLUMN).and_then(|v| v.as_str()).map(str::trim) == Some(sn.trim())
+    }) else {
+        return Ok(None);
+    };
+
+    let mut params = RemoteDeviceParams::default();
+
+    if let Some(id) = related_id(&record.values, "激光器") {
+        if let Some(laser) = fetch_related(LASER_TABLE, id).await? {
+            if let Some(model) = as_text(&laser, "型号") {
+                params.laser_type = Some(map_laser_type(&model));
+                params.laser_info = Some(model);
+            }
+            params.laser_current_ma = as_u32(&laser, "电流");
+            params.laser_freq_hz = as_u32(&laser, "频率");
+        }
+    }
+
+    if let Some(id) = related_id(&record.values, "电机") {
+        if let Some(motor) = fetch_related(MOTOR_TABLE, id).await? {
+            params.motor_speed_rpm = as_u32(&motor, "转速");
+        }
+    }
+
+    if let Some(id) = related_id(&record.values, "增益") {
+        if let Some(gain) = fetch_related(GAIN_TABLE, id).await? {
+            // 列名为 PMT0/1/2 时直接对应；否则兼容 PMT1/2/3
+            if gain.contains_key("PMT0") {
+                params.gain_pmt0 = as_f64(&gain, "PMT0");
+                params.gain_pmt1 = as_f64(&gain, "PMT1");
+                params.gain_pmt2 = as_f64(&gain, "PMT2");
+            } else {
+                params.gain_pmt0 = as_f64(&gain, "PMT1");
+                params.gain_pmt1 = as_f64(&gain, "PMT2");
+                params.gain_pmt2 = as_f64(&gain, "PMT3");
+            }
+            params.gain_apd = as_f64(&gain, "APD");
+        }
+    }
+
+    if let Some(id) = related_id(&record.values, "采集参数") {
+        if let Some(cap) = fetch_related(CAPTURE_TABLE, id).await? {
+            params.first_pos = as_u32(&cap, "第一段位置");
+            params.first_len = as_u32(&cap, "第一段长度");
+            params.second_pos = as_u32(&cap, "第二段位置");
+            params.second_len = as_u32(&cap, "第二段长度");
+            params.sum_value = as_u32(&cap, "和阈值");
+            params.max_value = as_u32(&cap, "值阈值");
+        }
+    }
+
+    Ok(Some(params))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,4 +525,8 @@ mod tests {
         eprintln!("记录数: {}", list.len());
         assert!(!list.is_empty(), "nocodb_list 返回空列表");
     }
+
+
+
+
 }

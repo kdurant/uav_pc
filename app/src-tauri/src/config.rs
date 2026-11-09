@@ -10,8 +10,12 @@ pub struct BasicConfig {
     #[serde(default = "default_broadcast_search")]
     pub broadcast_search: bool,
     /// broadcast_search = false 时使用的设备 IP 地址
-    #[serde(default)]
+    #[serde(default = "default_device_ip")]
     pub device_ip: String,
+}
+
+fn default_device_ip() -> String {
+    "192.168.1.10".to_string()
 }
 
 fn default_broadcast_search() -> bool {
@@ -63,6 +67,78 @@ pub struct CaptureConfig {
     pub sum_value: u32,
     pub max_value: u32,
     pub pin_threshold: u32,
+}
+
+/// 激光器默认设定（界面初始化与设备专用配置共用）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaserConfig {
+    /// 激光器电流（mA）
+    #[serde(default = "default_laser_current")]
+    pub current_ma: u32,
+    /// 触发/重频（Hz）
+    #[serde(default = "default_laser_freq")]
+    pub freq_hz: u32,
+}
+
+fn default_laser_current() -> u32 {
+    4300
+}
+
+fn default_laser_freq() -> u32 {
+    20000
+}
+
+impl Default for LaserConfig {
+    fn default() -> Self {
+        Self {
+            current_ma: default_laser_current(),
+            freq_hz: default_laser_freq(),
+        }
+    }
+}
+
+/// 电机默认设定
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MotorConfig {
+    /// 转速（rpm）
+    #[serde(default = "default_motor_speed")]
+    pub speed_rpm: u32,
+}
+
+fn default_motor_speed() -> u32 {
+    100
+}
+
+impl Default for MotorConfig {
+    fn default() -> Self {
+        Self {
+            speed_rpm: default_motor_speed(),
+        }
+    }
+}
+
+/// PMT / APD 增益默认设定（单位 V）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GainConfig {
+    #[serde(default)]
+    pub pmt0: f64,
+    #[serde(default)]
+    pub pmt1: f64,
+    #[serde(default)]
+    pub pmt2: f64,
+    #[serde(default)]
+    pub apd: f64,
+}
+
+impl Default for GainConfig {
+    fn default() -> Self {
+        Self {
+            pmt0: 0.0,
+            pmt1: 0.0,
+            pmt2: 0.0,
+            apd: 270.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +202,15 @@ pub struct AppConfig {
     /// 雷达名称/激光器信息；老配置文件缺省时使用默认值
     #[serde(default)]
     pub radar: RadarConfig,
+    /// 激光器默认设定；老配置文件缺省时使用默认值
+    #[serde(default)]
+    pub laser: LaserConfig,
+    /// 电机默认设定；老配置文件缺省时使用默认值
+    #[serde(default)]
+    pub motor: MotorConfig,
+    /// PMT / APD 增益；老配置文件缺省时使用默认值
+    #[serde(default)]
+    pub gain: GainConfig,
     pub capture: CaptureConfig,
     /// GPS 配置；老配置文件缺省时使用默认值
     #[serde(default)]
@@ -141,11 +226,11 @@ pub struct AppConfig {
 impl Default for BasicConfig {
     fn default() -> Self {
         Self {
-            local_ip: "192.168.93.44".to_string(),
+            local_ip: "192.168.1.111".to_string(),
             local_port: 12345,
             remote_port: 6666,
-            broadcast_search: true,
-            device_ip: String::new(),
+            broadcast_search: false,
+            device_ip: default_device_ip(),
         }
     }
 }
@@ -173,6 +258,9 @@ impl Default for AppConfig {
         Self {
             basic: BasicConfig::default(),
             radar: RadarConfig::default(),
+            laser: LaserConfig::default(),
+            motor: MotorConfig::default(),
+            gain: GainConfig::default(),
             capture: CaptureConfig::default(),
             gps: GpsConfig::default(),
             ssd: SsdConfig::default(),
@@ -206,10 +294,7 @@ impl AppConfig {
         let config = AppConfig::default();
         let content = toml::to_string_pretty(&config)?;
         std::fs::write(path, content)?;
-        log::info!(
-            "Config file not found, created default: {}",
-            path.display()
-        );
+        log::info!("Config file not found, created default: {}", path.display());
         Ok(config)
     }
 
@@ -287,8 +372,7 @@ impl AppConfig {
                 MAX_TEMP_POINTS
             ));
         }
-        if self.temperature.display_points == 0
-            || self.temperature.display_points > MAX_TEMP_POINTS
+        if self.temperature.display_points == 0 || self.temperature.display_points > MAX_TEMP_POINTS
         {
             return Err(format!(
                 "[temperature].display_points 必须在 1~{} 之间",
@@ -332,6 +416,17 @@ pub fn config_path() -> PathBuf {
     app_dir().join("config.toml")
 }
 
+/// 设备专用配置路径：`config_<SN>.toml`
+///
+/// SN 与 NocoDB、设备状态保持一致（如 `SN_260601ALCN`）。
+pub fn config_sn_path(sn: &str) -> Option<PathBuf> {
+    let sn = sn.trim();
+    if sn.is_empty() || sn.contains('/') || sn.contains('\\') || sn.contains("..") {
+        return None;
+    }
+    Some(app_dir().join(format!("config_{sn}.toml")))
+}
+
 /// 可执行文件所在目录。
 /// `config.toml` 与温度历史文件都放在这里，避免依赖启动时的工作目录。
 pub fn app_dir() -> PathBuf {
@@ -344,6 +439,30 @@ pub fn app_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_config_section_order() {
+        let text = toml::to_string_pretty(&AppConfig::default()).unwrap();
+        let sections = [
+            "[basic]",
+            "[radar]",
+            "[laser]",
+            "[motor]",
+            "[gain]",
+            "[capture]",
+            "[gps]",
+            "[ssd]",
+            "[temperature]",
+        ];
+        let mut last = 0;
+        for section in sections {
+            let pos = text
+                .find(section)
+                .unwrap_or_else(|| panic!("missing {section}"));
+            assert!(pos >= last, "section {section} is out of order");
+            last = pos;
+        }
+    }
 
     const CAPTURE: &str = r#"
 [capture]
@@ -368,7 +487,7 @@ pin_threshold = 2000
         );
         let config: AppConfig = toml::from_str(&toml).unwrap();
         assert!(config.basic.broadcast_search);
-        assert_eq!(config.basic.device_ip, "");
+        assert_eq!(config.basic.device_ip, "192.168.1.10");
         assert_eq!(config.temperature.save_points, 180);
         assert_eq!(config.temperature.display_points, 180);
         assert_eq!(config.ssd.chunk_mb, 1);

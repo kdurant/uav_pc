@@ -24,6 +24,7 @@ import { useReplay } from "../composables/useReplay";
 import { usePointCloud } from "../composables/usePointCloud";
 import { useLocalEndpoint } from "../composables/useLocalEndpoint";
 import DeviceProfileDialog from "./DeviceProfileDialog.vue";
+import ConfirmDialog from "./ConfirmDialog.vue";
 import { measureTargetDistance } from "../utils/targetDistance";
 import type { TargetMeasurement } from "../utils/targetDistance";
 import { ConnectionState } from "../types";
@@ -127,6 +128,132 @@ const showWizard = ref(false);
 // 命令透传弹窗
 const showPassthrough = ref(false);
 const isConnecting = ref(false);
+
+// ===== 设备专用配置（config_<SN>.toml） =====
+interface DeviceConfigResolution {
+  localExists: boolean;
+  networkAvailable: boolean;
+  remoteAvailable: boolean;
+  remoteChanged: boolean;
+}
+
+interface ApplyDeviceConfigResult {
+  restartRequired: boolean;
+  source: string;
+}
+
+const deviceConfigPrompt = ref<null | { kind: "local" | "remote" | "update"; sn: string }>(
+  null
+);
+const deviceConfigApplying = ref(false);
+let configCheckedSn = "";
+
+const deviceConfigMessage = computed(() => {
+  const prompt = deviceConfigPrompt.value;
+  if (!prompt) return "";
+  if (prompt.kind === "local") {
+    return `检测到设备 ${prompt.sn} 的本地专用配置文件，是否使用？`;
+  }
+  if (prompt.kind === "update") {
+    return `服务器上设备 ${prompt.sn} 的配置有更新，是否下载并更新本地配置？`;
+  }
+  return `服务器上存在设备 ${prompt.sn} 的配置，是否下载到本地并应用？`;
+});
+
+const deviceConfigConfirmText = computed(() => {
+  const kind = deviceConfigPrompt.value?.kind;
+  if (kind === "update") return "更新";
+  if (kind === "remote") return "下载";
+  return "加载";
+});
+
+async function applyDeviceConfig(sn: string, useRemote: boolean) {
+  if (deviceConfigApplying.value) return;
+  deviceConfigApplying.value = true;
+  try {
+    const result = await invoke<ApplyDeviceConfigResult>("apply_device_config", {
+      sn,
+      useRemote,
+    });
+    await loadRadarConfig(true);
+    if (result.restartRequired) {
+      toast.warning(
+        "设备配置已加载",
+        result.source === "remote"
+          ? "已从服务器下载，本机网络参数需重启后生效"
+          : "本机网络参数与当前不同，需重启后生效"
+      );
+    } else {
+      toast.success(
+        "设备配置已加载",
+        result.source === "remote" ? "已从服务器下载并应用" : "已使用本地专用配置"
+      );
+    }
+  } catch (e) {
+    console.error("apply_device_config failed:", e);
+    toast.error("设备配置加载失败", String(e));
+  } finally {
+    deviceConfigApplying.value = false;
+  }
+}
+
+async function checkDeviceConfig(sn: string) {
+  try {
+    const localExists = await invoke<boolean>("local_device_config_exists", { sn });
+    if (localExists) {
+      // 先直接加载本地专用配置，再查询服务器确认是否有更新
+      await applyDeviceConfig(sn, false);
+      const res = await invoke<DeviceConfigResolution>("resolve_device_config", { sn });
+      if (res.networkAvailable && res.remoteChanged) {
+        deviceConfigPrompt.value = { kind: "update", sn };
+      }
+      return;
+    }
+
+    // 本地没有配置：有网络且服务器有记录时提示下载
+    const res = await invoke<DeviceConfigResolution>("resolve_device_config", { sn });
+    if (res.networkAvailable && res.remoteAvailable) {
+      deviceConfigPrompt.value = { kind: "remote", sn };
+    }
+  } catch (e) {
+    console.error("checkDeviceConfig failed:", e);
+  }
+}
+
+async function confirmDeviceConfig() {
+  const prompt = deviceConfigPrompt.value;
+  deviceConfigPrompt.value = null;
+  if (!prompt) return;
+  // remote / update 都从服务器下载；local 读取本地文件
+  await applyDeviceConfig(prompt.sn, prompt.kind !== "local");
+}
+
+async function cancelDeviceConfig() {
+  const prompt = deviceConfigPrompt.value;
+  deviceConfigPrompt.value = null;
+  // 取消“更新”时仍按本地专用配置加载
+  if (prompt?.kind === "update") {
+    await applyDeviceConfig(prompt.sn, false);
+  }
+}
+
+watch(
+  () => status.value?.device_sn,
+  (sn) => {
+    const value = (sn ?? "").trim();
+    if (!value || value === configCheckedSn) return;
+    configCheckedSn = value;
+    void checkDeviceConfig(value);
+  },
+  { immediate: true }
+);
+
+watch(connectionState, (state) => {
+  if (state !== ConnectionState.Connected) {
+    configCheckedSn = "";
+    deviceConfigPrompt.value = null;
+  }
+});
 
 // 通道可见性
 const channelVisible = ref([true, true, true, true]);
@@ -616,6 +743,16 @@ handleSearch();
     <DeviceProfileDialog
       v-model:visible="profileDialogVisible"
       :initial-sn="status?.device_sn ?? ''"
+    />
+
+    <!-- 设备专用配置确认 -->
+    <ConfirmDialog
+      :visible="deviceConfigPrompt !== null"
+      title="设备配置"
+      :message="deviceConfigMessage"
+      :confirm-text="deviceConfigConfirmText"
+      @cancel="cancelDeviceConfig"
+      @confirm="confirmDeviceConfig"
     />
 
     <!-- 触发方式说明（状态面板 / 控制面板共用） -->

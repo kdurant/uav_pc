@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { MotorState } from "../../types";
+import { listen } from "@tauri-apps/api/event";
+import type { AppConfig, MotorState } from "../../types";
 import { useToast } from "../../composables/useToast";
 
 const props = defineProps<{
@@ -25,10 +26,33 @@ const MOTOR_ACTION_LABELS: Record<string, string> = {
 // ===== 电机控制（0x0f00 透传） =====
 const motorBusy = ref(false);
 const motorState = ref<MotorState | null>(null);
-const motorSpeed = ref(100); // r/s
+const motorSpeed = ref(100); // rpm
 const motorTargetPos = ref(0);
 /** 回零方法固定使用驱动器默认配置 */
 const MOTOR_HOME_METHOD = 34;
+
+/** 从配置初始化转速，设备专用配置应用后同步刷新 */
+function applyMotorDefaults(cfg: AppConfig) {
+  motorSpeed.value = cfg.motor.speed_rpm;
+}
+
+let unlistenConfig: (() => void) | null = null;
+
+onMounted(async () => {
+  try {
+    applyMotorDefaults(await invoke<AppConfig>("get_app_config"));
+  } catch (e) {
+    console.error("get_app_config failed:", e);
+  }
+  unlistenConfig = await listen<AppConfig>("device-config-applied", (event) => {
+    applyMotorDefaults(event.payload);
+  });
+});
+
+onUnmounted(() => {
+  unlistenConfig?.();
+  unlistenConfig = null;
+});
 
 async function motorAction(action: string, value?: number): Promise<boolean> {
   if (!props.connected || !props.deviceIp) return false;
@@ -103,7 +127,7 @@ watch(
         </div>
         <div class="feedback-row">
           <span class="feedback-name">实际速度</span>
-          <span class="feedback-val">{{ motorState ? motorState.velocity + " r/s" : "-" }}</span>
+          <span class="feedback-val">{{ motorState ? motorState.velocity + " rpm" : "-" }}</span>
         </div>
       </div>
       <button class="block" :disabled="motorBusy" @click="refreshMotorState">
@@ -122,7 +146,7 @@ watch(
       <h4 class="group-title">速度模式</h4>
       <div class="field-list">
         <label class="field">
-          <span class="field-label">目标转速 (r/s)</span>
+          <span class="field-label">目标转速 (rpm)</span>
           <input type="number" v-model.number="motorSpeed" min="0" max="3571" />
         </label>
       </div>

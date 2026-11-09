@@ -286,6 +286,142 @@ pub fn save_app_config(app: AppHandle, config: AppConfig) -> Result<SaveConfigRe
     Ok(SaveConfigResult { restart_required })
 }
 
+/// 设备专用配置解析结果
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceConfigResolution {
+    /// 本地是否存在 config_<SN>.toml
+    pub local_exists: bool,
+    /// 能否访问配置服务器（NocoDB）
+    pub network_available: bool,
+    /// 服务器上是否有该 SN 的有效配置
+    pub remote_available: bool,
+    /// 本地配置存在且与服务器参数不同
+    pub remote_changed: bool,
+}
+
+/// 设备专用配置应用结果
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyDeviceConfigResult {
+    pub config: AppConfig,
+    /// true：本机 IP / 端口变化，需要重启
+    pub restart_required: bool,
+    /// local / remote
+    pub source: String,
+}
+
+/// 本地是否存在设备专用配置（用于连接后先加载本地，再异步比对服务器）
+#[tauri::command]
+pub fn local_device_config_exists(sn: String) -> bool {
+    crate::config::config_sn_path(&sn)
+        .map(|p| p.exists())
+        .unwrap_or(false)
+}
+
+/// 解析设备专用配置：本地文件是否存在、网络是否可用、服务器是否有记录
+#[tauri::command]
+pub async fn resolve_device_config(sn: String) -> Result<DeviceConfigResolution, String> {
+    let local_exists = crate::config::config_sn_path(&sn)
+        .map(|p| p.exists())
+        .unwrap_or(false);
+
+    match crate::nocodb::fetch_device_params(&sn).await {
+        Ok(Some(params)) => {
+            // 本地已有配置时，比较服务器参数是否发生变化
+            let remote_changed = if local_exists {
+                crate::config::config_sn_path(&sn)
+                    .and_then(|path| AppConfig::load(&path).ok())
+                    .map(|local| params.differs_from(&local))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            Ok(DeviceConfigResolution {
+                local_exists,
+                network_available: true,
+                remote_available: params.has_data(),
+                remote_changed,
+            })
+        }
+        Ok(None) => Ok(DeviceConfigResolution {
+            local_exists,
+            network_available: true,
+            remote_available: false,
+            remote_changed: false,
+        }),
+        Err(e) => {
+            log::info!("Config server unavailable for {}: {}", sn, e);
+            Ok(DeviceConfigResolution {
+                local_exists,
+                network_available: false,
+                remote_available: false,
+                remote_changed: false,
+            })
+        }
+    }
+}
+
+/// 加载设备专用配置并应用到运行时。
+///
+/// - `use_remote = false`：读取本地 `config_<SN>.toml`
+/// - `use_remote = true`：从 NocoDB 拉取并保存为 `config_<SN>.toml`
+///
+/// 只更新上位机配置，不向设备下发任何参数。
+#[tauri::command]
+pub async fn apply_device_config(
+    app: AppHandle,
+    sn: String,
+    use_remote: bool,
+) -> Result<ApplyDeviceConfigResult, String> {
+    let path = crate::config::config_sn_path(&sn)
+        .ok_or_else(|| format!("无效的设备 SN: {sn}"))?;
+    let base = current_config(&app);
+
+    let (cfg, source) = if use_remote {
+        let params = crate::nocodb::fetch_device_params(&sn)
+            .await?
+            .ok_or_else(|| format!("服务器上未找到设备 {sn} 的配置"))?;
+        if !params.has_data() {
+            return Err(format!("服务器上设备 {sn} 的配置为空"));
+        }
+        let cfg = params.apply_to(base.clone());
+        cfg.validate()?;
+        cfg.save(&path)
+            .map_err(|e| format!("保存设备配置失败（{}）: {e}", path.display()))?;
+        log::info!("Device config downloaded: {}", path.display());
+        (cfg, "remote")
+    } else {
+        if !path.exists() {
+            return Err(format!("本地未找到设备配置: {}", path.display()));
+        }
+        let cfg = AppConfig::load(&path)
+            .map_err(|e| format!("读取设备配置失败（{}）: {e}", path.display()))?;
+        cfg.validate()?;
+        (cfg, "local")
+    };
+
+    let restart_required = config_restart_required(&base, &cfg);
+    *app.state::<ConfigState>()
+        .0
+        .write()
+        .map_err(|_| "配置锁已损坏，请重启上位机".to_string())? = cfg.clone();
+
+    let _ = app.emit("device-config-applied", &cfg);
+    log::info!(
+        "Device config applied ({}) for {}, restart_required={}",
+        source,
+        sn,
+        restart_required
+    );
+
+    Ok(ApplyDeviceConfigResult {
+        config: cfg,
+        restart_required,
+        source: source.to_string(),
+    })
+}
+
 /// 发现局域网内设备：发送 0x0100 广播，300ms 内收集响应设备；
 /// `[basic].broadcast_search = false` 时不广播，直接返回 `device_ip`
 #[tauri::command]

@@ -52,7 +52,7 @@ function emptyConfig(): AppConfig {
             local_port: 12345,
             remote_port: 6666,
             broadcast_search: true,
-            device_ip: "",
+            device_ip: "192.168.1.10",
         },
         radar: { display_name: "", laser_type: "laser_connet", laser_info: "" },
         capture: {
@@ -71,6 +71,9 @@ function emptyConfig(): AppConfig {
         gps: { dir: "/run/media/mmcblk1p1/" },
         ssd: { chunk_mb: 1 },
         temperature: { save_points: 180, display_points: 180 },
+        laser: { current_ma: 4300, freq_hz: 20000 },
+        motor: { speed_rpm: 100 },
+        gain: { pmt0: 0, pmt1: 0, pmt2: 0, apd: 270 },
     };
 }
 
