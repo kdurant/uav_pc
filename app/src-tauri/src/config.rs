@@ -133,7 +133,7 @@ pub struct GainConfig {
 impl Default for GainConfig {
     fn default() -> Self {
         Self {
-            pmt0: 0.0,
+            pmt0: 3.0,
             pmt1: 0.0,
             pmt2: 0.0,
             apd: 270.0,
