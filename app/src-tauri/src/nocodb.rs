@@ -249,7 +249,109 @@ pub struct RemoteDeviceParams {
     pub pin_threshold: Option<u32>,
 }
 
+/// 单条配置差异
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigDiffItem {
+    pub label: String,
+    pub local: String,
+    pub remote: String,
+}
+
+fn diff_u32(out: &mut Vec<ConfigDiffItem>, label: &str, local: u32, remote: u32) {
+    if local != remote {
+        out.push(ConfigDiffItem {
+            label: label.to_string(),
+            local: local.to_string(),
+            remote: remote.to_string(),
+        });
+    }
+}
+
+fn diff_f64(out: &mut Vec<ConfigDiffItem>, label: &str, local: f64, remote: f64) {
+    if local != remote {
+        let fmt = |v: f64| {
+            if v.fract().abs() < f64::EPSILON {
+                format!("{v:.0}")
+            } else {
+                format!("{v}")
+            }
+        };
+        out.push(ConfigDiffItem {
+            label: label.to_string(),
+            local: fmt(local),
+            remote: fmt(remote),
+        });
+    }
+}
+
+fn diff_str(out: &mut Vec<ConfigDiffItem>, label: &str, local: &str, remote: &str) {
+    if local != remote {
+        out.push(ConfigDiffItem {
+            label: label.to_string(),
+            local: local.to_string(),
+            remote: remote.to_string(),
+        });
+    }
+}
+
 impl RemoteDeviceParams {
+    /// 逐字段比较本地配置，返回存在差异的项
+    pub fn diff_items(&self, cfg: &AppConfig) -> Vec<ConfigDiffItem> {
+        let mut out = Vec::new();
+
+        if let Some(v) = &self.laser_type {
+            diff_str(&mut out, "激光器类型", &cfg.radar.laser_type, v);
+        }
+        if let Some(v) = &self.laser_info {
+            diff_str(&mut out, "激光器型号", &cfg.radar.laser_info, v);
+        }
+        if let Some(v) = self.laser_current_ma {
+            diff_u32(&mut out, "激光器电流 (mA)", cfg.laser.current_ma, v);
+        }
+        if let Some(v) = self.laser_freq_hz {
+            diff_u32(&mut out, "激光器频率 (Hz)", cfg.laser.freq_hz, v);
+        }
+        if let Some(v) = self.motor_speed_rpm {
+            diff_u32(&mut out, "电机转速 (rpm)", cfg.motor.speed_rpm, v);
+        }
+        if let Some(v) = self.gain_pmt0 {
+            diff_f64(&mut out, "PMT0 (V)", cfg.gain.pmt0, v);
+        }
+        if let Some(v) = self.gain_pmt1 {
+            diff_f64(&mut out, "PMT1 (V)", cfg.gain.pmt1, v);
+        }
+        if let Some(v) = self.gain_pmt2 {
+            diff_f64(&mut out, "PMT2 (V)", cfg.gain.pmt2, v);
+        }
+        if let Some(v) = self.gain_apd {
+            diff_f64(&mut out, "APD 高压 (V)", cfg.gain.apd, v);
+        }
+        if let Some(v) = self.first_pos {
+            diff_u32(&mut out, "第一段位置", cfg.capture.first_pos, v);
+        }
+        if let Some(v) = self.first_len {
+            diff_u32(&mut out, "第一段长度", cfg.capture.first_len, v);
+        }
+        if let Some(v) = self.second_pos {
+            diff_u32(&mut out, "第二段位置", cfg.capture.second_pos, v);
+        }
+        if let Some(v) = self.second_len {
+            diff_u32(&mut out, "第二段长度", cfg.capture.second_len, v);
+        }
+        if let Some(v) = self.sum_value {
+            diff_u32(&mut out, "和阈值", cfg.capture.sum_value, v);
+        }
+        if let Some(v) = self.max_value {
+            diff_u32(&mut out, "值阈值", cfg.capture.max_value, v);
+        }
+        if let Some(v) = self.pin_threshold {
+            diff_u32(&mut out, "PIN 阈值", cfg.capture.pin_threshold, v);
+        }
+
+        out
+    }
+
     /// 是否至少包含一个有效配置项
     pub fn has_data(&self) -> bool {
         self.laser_type.is_some()

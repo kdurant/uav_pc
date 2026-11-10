@@ -7,17 +7,21 @@ withDefaults(
     confirmText?: string;
     cancelText?: string;
     danger?: boolean;
+    /** 额外的中间按钮文案，为空时不显示 */
+    extraText?: string;
   }>(),
   {
     confirmText: "确定",
     cancelText: "取消",
     danger: false,
+    extraText: "",
   }
 );
 
 const emit = defineEmits<{
   (e: "confirm"): void;
   (e: "cancel"): void;
+  (e: "extra"): void;
 }>();
 </script>
 
@@ -28,6 +32,7 @@ const emit = defineEmits<{
         <h3>{{ title }}</h3>
         <p>{{ message }}</p>
         <div class="confirm-actions">
+          <button v-if="extraText" @click="emit('extra')">{{ extraText }}</button>
           <button @click="emit('cancel')">{{ cancelText }}</button>
           <button
             class="confirm-danger"

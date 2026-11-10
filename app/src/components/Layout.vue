@@ -25,9 +25,11 @@ import { usePointCloud } from "../composables/usePointCloud";
 import { useLocalEndpoint } from "../composables/useLocalEndpoint";
 import DeviceProfileDialog from "./DeviceProfileDialog.vue";
 import ConfirmDialog from "./ConfirmDialog.vue";
+import ConfigDiffDialog from "./ConfigDiffDialog.vue";
 import { measureTargetDistance } from "../utils/targetDistance";
 import type { TargetMeasurement } from "../utils/targetDistance";
 import { ConnectionState } from "../types";
+import type { ConfigDiffItem } from "../types";
 import type { PreviewFrame } from "../types";
 
 const { devices, isSearching, selectedDevice, searchDevices, selectDevice, clearSelection } =
@@ -135,6 +137,7 @@ interface DeviceConfigResolution {
   networkAvailable: boolean;
   remoteAvailable: boolean;
   remoteChanged: boolean;
+  diff: ConfigDiffItem[];
 }
 
 interface ApplyDeviceConfigResult {
@@ -146,6 +149,8 @@ const deviceConfigPrompt = ref<null | { kind: "local" | "remote" | "update"; sn:
   null
 );
 const deviceConfigApplying = ref(false);
+const deviceConfigDiff = ref<ConfigDiffItem[]>([]);
+const deviceConfigDiffVisible = ref(false);
 let configCheckedSn = "";
 
 const deviceConfigMessage = computed(() => {
@@ -166,6 +171,21 @@ const deviceConfigConfirmText = computed(() => {
   if (kind === "remote") return "下载";
   return "加载";
 });
+
+const deviceConfigExtraText = computed(() =>
+  deviceConfigPrompt.value?.kind === "update" ? "查看差异" : ""
+);
+
+function openDeviceConfigDiff() {
+  deviceConfigPrompt.value = null;
+  deviceConfigDiffVisible.value = true;
+}
+
+async function confirmDeviceConfigUpdate() {
+  deviceConfigDiffVisible.value = false;
+  const sn = configCheckedSn;
+  if (sn) await applyDeviceConfig(sn, true);
+}
 
 async function applyDeviceConfig(sn: string, useRemote: boolean) {
   if (deviceConfigApplying.value) return;
@@ -205,6 +225,7 @@ async function checkDeviceConfig(sn: string) {
       await applyDeviceConfig(sn, false);
       const res = await invoke<DeviceConfigResolution>("resolve_device_config", { sn });
       if (res.networkAvailable && res.remoteChanged) {
+        deviceConfigDiff.value = res.diff;
         deviceConfigPrompt.value = { kind: "update", sn };
       }
       return;
@@ -751,8 +772,19 @@ handleSearch();
       title="设备配置"
       :message="deviceConfigMessage"
       :confirm-text="deviceConfigConfirmText"
+      :extra-text="deviceConfigExtraText"
       @cancel="cancelDeviceConfig"
       @confirm="confirmDeviceConfig"
+      @extra="openDeviceConfigDiff"
+    />
+
+    <!-- 设备配置差异 -->
+    <ConfigDiffDialog
+      :visible="deviceConfigDiffVisible"
+      :sn="configCheckedSn"
+      :diffs="deviceConfigDiff"
+      @cancel="deviceConfigDiffVisible = false"
+      @confirm="confirmDeviceConfigUpdate"
     />
 
     <!-- 触发方式说明（状态面板 / 控制面板共用） -->

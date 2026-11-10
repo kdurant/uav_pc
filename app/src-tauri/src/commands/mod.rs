@@ -298,6 +298,8 @@ pub struct DeviceConfigResolution {
     pub remote_available: bool,
     /// 本地配置存在且与服务器参数不同
     pub remote_changed: bool,
+    /// 本地与服务器存在差异的字段
+    pub diff: Vec<crate::nocodb::ConfigDiffItem>,
 }
 
 /// 设备专用配置应用结果
@@ -328,20 +330,22 @@ pub async fn resolve_device_config(sn: String) -> Result<DeviceConfigResolution,
 
     match crate::nocodb::fetch_device_params(&sn).await {
         Ok(Some(params)) => {
-            // 本地已有配置时，比较服务器参数是否发生变化
-            let remote_changed = if local_exists {
+            // 本地已有配置时，逐字段比较服务器参数
+            let diff = if local_exists {
                 crate::config::config_sn_path(&sn)
                     .and_then(|path| AppConfig::load(&path).ok())
-                    .map(|local| params.differs_from(&local))
-                    .unwrap_or(false)
+                    .map(|local| params.diff_items(&local))
+                    .unwrap_or_default()
             } else {
-                false
+                Vec::new()
             };
+            let remote_changed = !diff.is_empty();
             Ok(DeviceConfigResolution {
                 local_exists,
                 network_available: true,
                 remote_available: params.has_data(),
                 remote_changed,
+                diff,
             })
         }
         Ok(None) => Ok(DeviceConfigResolution {
@@ -349,6 +353,7 @@ pub async fn resolve_device_config(sn: String) -> Result<DeviceConfigResolution,
             network_available: true,
             remote_available: false,
             remote_changed: false,
+            diff: Vec::new(),
         }),
         Err(e) => {
             log::info!("Config server unavailable for {}: {}", sn, e);
@@ -357,6 +362,7 @@ pub async fn resolve_device_config(sn: String) -> Result<DeviceConfigResolution,
                 network_available: false,
                 remote_available: false,
                 remote_changed: false,
+                diff: Vec::new(),
             })
         }
     }

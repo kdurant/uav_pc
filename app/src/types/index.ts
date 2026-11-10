@@ -314,7 +314,12 @@ export interface ReplayInfo {
     skipped_bytes: number;
 }
 
-/** 回放帧的 GPS / 姿态信息，供设备状态面板显示 */
+/** 设备配置差异项（本地 vs 服务器） */
+export interface ConfigDiffItem {
+    label: string;
+    local: string;
+    remote: string;
+}
 export interface ReplayGps {
     /** 当前帧号（0 基） */
     frameIndex: number;
