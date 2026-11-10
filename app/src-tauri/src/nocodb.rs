@@ -531,11 +531,31 @@ fn as_text(obj: &Map<String, Value>, key: &str) -> Option<String> {
 }
 
 /// NocoDB 中的激光器型号 → 上位机协议类型
+///
+/// 支持型号直接写类型名（如 `nanjing_5k`），也兼容厂商/频率关键字：
+/// 南京中科神光、上海翰宇、Keopsys。无法识别时原样返回，交由配置校验拒绝。
 pub fn map_laser_type(model: &str) -> String {
-    if model.to_lowercase().contains("5k") {
-        "laser_5kHz".to_string()
+    let lower = model.to_lowercase();
+    let compact: String = lower
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '-' | '_' | '/' | '\\'))
+        .collect();
+
+    if compact.contains("nanjing5k") || (compact.contains("南京") && compact.contains("5k")) {
+        "nanjing_5k".to_string()
+    } else if compact.contains("nanjing20k")
+        || (compact.contains("南京") && compact.contains("20k"))
+    {
+        "nanjing_20k".to_string()
+    } else if compact.contains("keopsys") {
+        "keopsys_20k".to_string()
+    } else if compact.contains("connet")
+        || compact.contains("翰宇")
+        || compact.contains("hanyu")
+    {
+        "connet_20k".to_string()
     } else {
-        "laser_connet".to_string()
+        model.trim().to_string()
     }
 }
 
@@ -604,6 +624,24 @@ pub async fn fetch_device_params(sn: &str) -> Result<Option<RemoteDeviceParams>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_map_laser_type() {
+        // 直接写类型名
+        assert_eq!(map_laser_type("nanjing_5k"), "nanjing_5k");
+        assert_eq!(map_laser_type("nanjing_20k"), "nanjing_20k");
+        assert_eq!(map_laser_type("connet_20k"), "connet_20k");
+        assert_eq!(map_laser_type("keopsys_20k"), "keopsys_20k");
+
+        // 厂商 + 频率关键字
+        assert_eq!(map_laser_type("南京中科神光 5K"), "nanjing_5k");
+        assert_eq!(map_laser_type("南京中科神光 20K"), "nanjing_20k");
+        assert_eq!(map_laser_type("上海翰宇 20K"), "connet_20k");
+        assert_eq!(map_laser_type("Keopsys 20K"), "keopsys_20k");
+
+        // 无法识别时原样返回，由配置校验拒绝
+        assert_eq!(map_laser_type("unknown"), "unknown");
+    }
 
     /// 真实网络测试，默认忽略：`cargo test -- --ignored nocodb`
     #[tokio::test]

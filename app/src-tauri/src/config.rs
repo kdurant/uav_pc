@@ -28,7 +28,8 @@ pub struct RadarConfig {
     /// 上位机显示名称，例如 "5K 雷达"
     #[serde(default = "default_radar_display_name")]
     pub display_name: String,
-    /// 激光器类型，用于选择通信协议；当前支持 laser_connet
+    /// 激光器类型，用于选择通信协议：
+    /// nanjing_5k / nanjing_20k / connet_20k / keopsys_20k
     #[serde(default = "default_laser_type")]
     pub laser_type: String,
     /// 自定义激光器信息，仅用于界面展示
@@ -41,7 +42,7 @@ fn default_radar_display_name() -> String {
 }
 
 fn default_laser_type() -> String {
-    "laser_connet".to_string()
+    "connet_20k".to_string()
 }
 
 impl Default for RadarConfig {
@@ -332,10 +333,13 @@ impl AppConfig {
         // 雷达 / 激光器
         let laser_type = self.radar.laser_type.trim();
         if !laser_type.is_empty()
-            && !matches!(laser_type, "laser_connet" | "laserConnet" | "laser_5kHz")
+            && !matches!(
+                laser_type,
+                "nanjing_5k" | "nanjing_20k" | "connet_20k" | "keopsys_20k"
+            )
         {
             return Err(format!(
-                "[radar].laser_type 不支持: {:?}（可选 laser_connet / laser_5kHz）",
+                "[radar].laser_type 不支持: {:?}（可选 nanjing_5k / nanjing_20k / connet_20k / keopsys_20k）",
                 self.radar.laser_type
             ));
         }
@@ -492,19 +496,19 @@ pin_threshold = 2000
         assert_eq!(config.temperature.display_points, 180);
         assert_eq!(config.ssd.chunk_mb, 1);
         assert_eq!(config.radar.display_name, "雷达");
-        assert_eq!(config.radar.laser_type, "laser_connet");
+        assert_eq!(config.radar.laser_type, "connet_20k");
         assert_eq!(config.radar.laser_info, "");
     }
 
     #[test]
     fn test_radar_config() {
         let toml = format!(
-            "[basic]\nlocal_ip = \"192.168.1.111\"\nlocal_port = 12345\nremote_port = 6666\n[radar]\ndisplay_name = \"5K 雷达\"\nlaser_type = \"laser_connet\"\nlaser_info = \"Laser A / 20kHz\"\n{}",
+            "[basic]\nlocal_ip = \"192.168.1.111\"\nlocal_port = 12345\nremote_port = 6666\n[radar]\ndisplay_name = \"5K 雷达\"\nlaser_type = \"connet_20k\"\nlaser_info = \"Laser A / 20kHz\"\n{}",
             CAPTURE
         );
         let config: AppConfig = toml::from_str(&toml).unwrap();
         assert_eq!(config.radar.display_name, "5K 雷达");
-        assert_eq!(config.radar.laser_type, "laser_connet");
+        assert_eq!(config.radar.laser_type, "connet_20k");
         assert_eq!(config.radar.laser_info, "Laser A / 20kHz");
     }
 
@@ -559,6 +563,27 @@ pin_threshold = 2000
         let mut config = AppConfig::default();
         config.temperature.save_points = 0;
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_laser_type_whitelist() {
+        for laser_type in ["nanjing_5k", "nanjing_20k", "connet_20k", "keopsys_20k", ""] {
+            let mut config = AppConfig::default();
+            config.radar.laser_type = laser_type.to_string();
+            assert!(
+                config.validate().is_ok(),
+                "laser_type = {laser_type:?} 应该被接受"
+            );
+        }
+
+        for laser_type in ["laser_connet", "laserConnet", "laser_5kHz", "unknown"] {
+            let mut config = AppConfig::default();
+            config.radar.laser_type = laser_type.to_string();
+            assert!(
+                config.validate().is_err(),
+                "laser_type = {laser_type:?} 应该被拒绝"
+            );
+        }
     }
 
     #[test]

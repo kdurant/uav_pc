@@ -15,13 +15,10 @@ use serde::Serialize;
 /// 等待激光器应答的超时时间
 pub const LASER_RESPONSE_TIMEOUT_MS: u64 = 1000;
 
-/// 当前上位机支持的激光器类型。
-/// `laserConnet` 是设备端 auto_start 的旧写法，保留兼容。
+/// 使用本模块 AA55 协议的激光器类型。
+/// 其余类型由 `control.rs` 分派（nanjing_5k 走 5kHz 协议；nanjing_20k / keopsys_20k 协议待确认）。
 pub fn is_supported_type(laser_type: &str) -> bool {
-    matches!(
-        laser_type,
-        "laser_connet" | "laserConnet" | "laser_5kHz"
-    )
+    matches!(laser_type, "connet_20k")
 }
 
 /// 激光器工作模式
@@ -50,7 +47,7 @@ pub struct LaserStatus {
     /// 输出功率（mW）
     pub export_power: u32,
 
-    // ===== 5kHz 激光器扩展字段（laser_5kHz） =====
+    // ===== 5kHz 激光器扩展字段（nanjing_5k） =====
     /// 激光器编号
     pub laser_number: Option<u8>,
     /// 检测到的触发频率（Hz）
@@ -190,11 +187,12 @@ mod tests {
 
     #[test]
     fn test_supported_laser_types() {
-        assert!(is_supported_type("laser_connet"));
-        assert!(is_supported_type("laserConnet"));
-        assert!(is_supported_type("laser_5kHz"));
+        assert!(is_supported_type("connet_20k"));
+        assert!(!is_supported_type("nanjing_5k"));
+        assert!(!is_supported_type("nanjing_20k"));
+        assert!(!is_supported_type("keopsys_20k"));
         assert!(!is_supported_type(""));
-        assert!(!is_supported_type("china"));
+        assert!(!is_supported_type("laser_connet"));
     }
 
     #[test]

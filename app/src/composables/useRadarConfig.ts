@@ -7,7 +7,7 @@ import type { RadarConfig } from "../types";
  * 设置界面保存后会调用 reload() 立即刷新，无需重启上位机。
  */
 const displayName = ref("雷达");
-const laserType = ref("laser_connet");
+const laserType = ref("connet_20k");
 const loaded = ref(false);
 let loading: Promise<void> | null = null;
 

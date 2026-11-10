@@ -39,11 +39,19 @@ onUnmounted(() => {
   unlistenConfig = null;
 });
 
-/** 当前支持 laser_connet（含设备端旧写法）和 laser_5kHz */
-const laserSupported = computed(() =>
-  ["laser_connet", "laserConnet", "laser_5kHz"].includes(laserType.value)
-);
+/** 已实现通信协议的激光器类型：nanjing_5k（5kHz 协议）、connet_20k（AA55 协议） */
+const SUPPORTED_LASER_TYPES = ["nanjing_5k", "connet_20k"];
+/** 配置可选、但通信协议尚未确认的类型：只允许选择，禁用控制 */
+const PENDING_LASER_TYPES = ["nanjing_20k", "keopsys_20k"];
+
+const laserSupported = computed(() => SUPPORTED_LASER_TYPES.includes(laserType.value));
+const laserPendingProtocol = computed(() => PENDING_LASER_TYPES.includes(laserType.value));
 const laserUnavailable = computed(() => !laserSupported.value);
+const laserUnavailableReason = computed(() =>
+  laserPendingProtocol.value
+    ? `当前激光器（${laserType.value}）的通信协议尚未确认，激光器控制已禁用。`
+    : "当前激光器协议不可用，激光器控制已禁用。请检查配置文件。"
+);
 
 /** 命令动作 → 中文提示名，用于失败通知 */
 const LASER_ACTION_LABELS: Record<string, string> = {
@@ -68,15 +76,22 @@ const laserBusy = ref(false);
 /** 最近一次开光/关光操作时间，用于抑制旧状态回写使能开关 */
 let lastLaserToggleAt = 0;
 
-const laserFreqMax = computed(() =>
-  laserType.value === "laser_5kHz" ? 5000 : 100000
-);
+/** 各类型重频上限（Hz）：5k 型号 5kHz，20k 型号 20kHz */
+const LASER_FREQ_MAX: Record<string, number> = {
+  nanjing_5k: 5000,
+  nanjing_20k: 20000,
+  connet_20k: 20000,
+  keopsys_20k: 20000,
+};
+
+const laserFreqMax = computed(() => LASER_FREQ_MAX[laserType.value] ?? 20000);
 
 watch(
   laserType,
   (type) => {
-    if (type === "laser_5kHz" && laserFreq.value > 5000) {
-      laserFreq.value = 5000;
+    const max = LASER_FREQ_MAX[type];
+    if (max && laserFreq.value > max) {
+      laserFreq.value = max;
     }
   },
   { immediate: true }
@@ -136,7 +151,7 @@ async function toggleLaser() {
       laserEnabled.value = false;
       return;
     }
-    if (laserType.value !== "laser_5kHz") {
+    if (laserType.value !== "nanjing_5k") {
       await laserAction("current", Math.trunc(laserCurrent.value));
     }
   } else {
@@ -267,7 +282,7 @@ const laserStatusItems = computed(() => {
   const s = laserStatus.value;
   const dash = "-";
 
-  if (laserType.value === "laser_5kHz") {
+  if (laserType.value === "nanjing_5k") {
     return [
       { label: "开关状态", value: s ? (s.status === 0 ? "关闭" : "开启") : dash },
       {
@@ -336,7 +351,7 @@ const laserStatusItems = computed(() => {
       <h4 class="group-title">激光器参数</h4>
 
       <p v-if="laserUnavailable" class="laser-warning">
-        当前激光器协议不可用，激光器控制已禁用。请检查配置文件。
+        {{ laserUnavailableReason }}
       </p>
 
       <div class="field-list">
@@ -420,7 +435,7 @@ const laserStatusItems = computed(() => {
         </label>
       </div>
       <button
-        v-if="laserType === 'laser_5kHz'"
+        v-if="laserType === 'nanjing_5k'"
         class="block"
         :disabled="laserBusy || laserUnavailable"
         @click="clearLaserError"

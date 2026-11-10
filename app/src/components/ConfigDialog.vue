@@ -22,11 +22,12 @@ const toast = useToast();
 const { reload: reloadRadarConfig } = useRadarConfig();
 const { reload: reloadCaptureConfig } = useCaptureConfig();
 
-/** 可选激光器类型（与后端 laser::is_supported_type 保持一致） */
+/** 可选激光器类型（与后端 config.rs 校验、control.rs 协议分派保持一致） */
 const LASER_TYPES = [
-    { value: "laser_connet", label: "激光器（laser_connet）" },
-    { value: "laser_5kHz", label: "5kHz 激光器（laser_5kHz）" },
-    { value: "laserConnet", label: "兼容别名（laserConnet）" },
+    { value: "nanjing_5k", label: "南京中科神光 5kHz（nanjing_5k）" },
+    { value: "nanjing_20k", label: "南京中科神光 20kHz（nanjing_20k，协议待确认）" },
+    { value: "connet_20k", label: "上海翰宇 20kHz（connet_20k）" },
+    { value: "keopsys_20k", label: "进口 Keopsys 20kHz（keopsys_20k，协议待确认）" },
 ];
 
 /** 采集参数：启动时会填入采集面板；pin_threshold 暂未在界面使用 */
@@ -54,7 +55,7 @@ function emptyConfig(): AppConfig {
             broadcast_search: true,
             device_ip: "192.168.1.10",
         },
-        radar: { display_name: "", laser_type: "laser_connet", laser_info: "" },
+        radar: { display_name: "", laser_type: "connet_20k", laser_info: "" },
         capture: {
             preview_coe: 1000,
             ref_channal: 1,

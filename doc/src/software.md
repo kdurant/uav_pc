@@ -29,8 +29,12 @@ device_ip = "192.168.93.100"
 [radar]
 # 上位机显示名称（顶部品牌区域）
 display_name = "5K 雷达"
-# 激光器类型，上位机据此选择通信协议；当前支持 laser_connet / laser_5kHz
-laser_type = "laser_connet"
+# 激光器类型，上位机据此选择通信协议：
+#   nanjing_5k    南京中科神光 5kHz（5kHz 协议）
+#   nanjing_20k   南京中科神光 20kHz（协议待确认，暂不支持控制）
+#   connet_20k    上海翰宇 20kHz（AA55 协议）
+#   keopsys_20k   进口 Keopsys 20kHz（协议待确认，暂不支持控制）
+laser_type = "connet_20k"
 # 自定义激光器信息（预留字段，当前不在界面显示）
 laser_info = ""
 
@@ -126,7 +130,15 @@ display_points = 180
 2. 通过 0x0201 设置激光重频
 3. 状态查询返回箱体/泵浦温度、泵浦电流与输出功率（字段格式见 [pc-ps.md](./pc-ps.md)）
 
-### 5kHz 激光器（laser_5kHz）
+### 激光器类型与协议
+| laser_type | 厂商 / 型号 | 通信协议 |
+| --- | --- | --- |
+| `nanjing_5k` | 南京中科神光 5kHz | 5kHz 主控板协议（`55 AA ... 33 CC`） |
+| `nanjing_20k` | 南京中科神光 20kHz | 待确认，暂不支持控制 |
+| `connet_20k` | 上海翰宇 20kHz | AA55 协议（默认） |
+| `keopsys_20k` | 进口 Keopsys 20kHz | 待确认，暂不支持控制 |
+
+### 5kHz 激光器（nanjing_5k）
 1. 协议：115200 8N1，帧格式 `55 AA 00 <cmd> ... <sum> 33 CC`
 2. 支持开光/关光、内/外触发、1~5000Hz、0~6000mA、50~80µs 脉宽、清报警和状态查询
 3. 设备端激光串口波特率需要配置为 115200，并经 0x0200 透传

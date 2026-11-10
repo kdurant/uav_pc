@@ -20,17 +20,24 @@ pub async fn laser_command(
     action: String,
     value: Option<u32>,
 ) -> Result<Option<LaserStatus>, String> {
-    // 根据 config.toml [radar].laser_type 选择激光器通信协议。
-    // 目前只有 laser_connet；未知类型直接拒绝，避免用错协议操作激光器。
+    // 根据 config.toml [radar].laser_type 选择激光器通信协议：
+    // - nanjing_5k：5kHz 主控板协议（laser_5khz）
+    // - connet_20k：AA55 协议（laser）
+    // - nanjing_20k / keopsys_20k：协议尚未确认，直接拒绝，避免用错协议操作激光器
     let laser_type = current_config(&app).radar.laser_type.trim().to_string();
     if laser_type.is_empty() {
         return Err("未配置激光器类型（config.toml [radar].laser_type）".into());
     }
-    if laser_type == "laser_5kHz" {
-        return laser_5khz_command(app, device_ip, action, value).await;
-    }
-    if !laser::is_supported_type(&laser_type) {
-        return Err(format!("暂不支持激光器类型: {}", laser_type));
+    match laser_type.as_str() {
+        "nanjing_5k" => return laser_5khz_command(app, device_ip, action, value).await,
+        "connet_20k" => {}
+        "nanjing_20k" | "keopsys_20k" => {
+            return Err(format!(
+                "激光器 {} 的通信协议尚未确认，暂不支持控制",
+                laser_type
+            ))
+        }
+        other => return Err(format!("不支持的激光器类型: {}", other)),
     }
 
     let _op = acquire_op_lock(&app).await;
