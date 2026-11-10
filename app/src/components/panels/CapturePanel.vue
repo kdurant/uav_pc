@@ -30,6 +30,7 @@ const secondPos = ref(400);
 const secondLen = ref(400);
 const sumLevel = ref(0);
 const minLevel = ref(0);
+const pinThreshold = ref(2000);
 const settingInProgress = ref(false);
 
 // ===== 启动时从 config.toml [capture] 初始化参数 =====
@@ -37,7 +38,7 @@ const { capture, load: loadCaptureConfig, reload: reloadCaptureConfig } = useCap
 
 /**
  * 用配置文件初始化采集参数（仅填充界面，不自动下发）。
- * 对应关系：sum_value → 和阈值，max_value → 值阈值；pin_threshold 暂未在界面展示。
+ * 对应关系：sum_value → 和阈值，max_value → 值阈值，pin_threshold → PIN 阈值。
  */
 function applyCaptureConfig() {
   const c = capture.value;
@@ -50,6 +51,7 @@ function applyCaptureConfig() {
   secondLen.value = c.second_len;
   sumLevel.value = c.sum_value;
   minLevel.value = c.max_value;
+  pinThreshold.value = c.pin_threshold;
 }
 
 let unlistenConfig: (() => void) | null = null;
@@ -132,6 +134,7 @@ async function sendAllCaptureParams() {
     [0x0308, secondLen.value],
     [0x0309, sumLevel.value],
     [0x0310, minLevel.value],
+    [0x0321, pinThreshold.value],
   ];
   for (const [cmd, value] of batch) {
     await sendParam(cmd, value);
@@ -225,6 +228,10 @@ async function setTrgMode() {
         <label class="field">
           <span class="field-label">值阈值</span>
           <input type="number" v-model.number="minLevel" />
+        </label>
+        <label class="field">
+          <span class="field-label">PIN 阈值</span>
+          <input type="number" v-model.number="pinThreshold" min="0" />
         </label>
       </div>
 

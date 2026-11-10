@@ -246,6 +246,7 @@ pub struct RemoteDeviceParams {
     pub second_len: Option<u32>,
     pub sum_value: Option<u32>,
     pub max_value: Option<u32>,
+    pub pin_threshold: Option<u32>,
 }
 
 impl RemoteDeviceParams {
@@ -263,6 +264,7 @@ impl RemoteDeviceParams {
             || self.second_len.is_some()
             || self.sum_value.is_some()
             || self.max_value.is_some()
+            || self.pin_threshold.is_some()
     }
 
     /// 与本地配置比较，判断服务器参数是否发生变化。
@@ -327,6 +329,10 @@ impl RemoteDeviceParams {
                 .max_value
                 .map(|v| v != cfg.capture.max_value)
                 .unwrap_or(false)
+            || self
+                .pin_threshold
+                .map(|v| v != cfg.capture.pin_threshold)
+                .unwrap_or(false)
     }
 
     /// 覆盖到完整配置上，未提供的字段保持原值
@@ -375,6 +381,9 @@ impl RemoteDeviceParams {
         }
         if let Some(v) = self.max_value {
             cfg.capture.max_value = v;
+        }
+        if let Some(v) = self.pin_threshold {
+            cfg.capture.pin_threshold = v;
         }
         cfg
     }
@@ -482,6 +491,8 @@ pub async fn fetch_device_params(sn: &str) -> Result<Option<RemoteDeviceParams>,
             params.second_len = as_u32(&cap, "第二段长度");
             params.sum_value = as_u32(&cap, "和阈值");
             params.max_value = as_u32(&cap, "值阈值");
+            params.pin_threshold =
+                as_u32(&cap, "PIN阈值").or_else(|| as_u32(&cap, "PIN 阈值"));
         }
     }
 
@@ -525,6 +536,8 @@ mod tests {
         eprintln!("记录数: {}", list.len());
         assert!(!list.is_empty(), "nocodb_list 返回空列表");
     }
+
+
 
 
 
