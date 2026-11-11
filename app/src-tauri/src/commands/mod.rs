@@ -1,5 +1,5 @@
 use crate::config::AppConfig;
-use crate::laser::{self, LaserStatus};
+use crate::nanjing_20k::{self, LaserStatus};
 use crate::motor::{self, MotorState};
 use crate::network::UdpNetwork;
 use crate::protocol::{Frame, SourceAddr, DestAddr};

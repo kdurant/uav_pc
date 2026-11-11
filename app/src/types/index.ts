@@ -212,6 +212,32 @@ export interface LaserStatus {
     work_time_s?: number | null;
     status_flags?: number | null;
     error_flags?: number | null;
+
+    // ===== Connet 20k 扩展信息 =====
+    /** 基本信息（0xD1） */
+    basic?: LaserBasicInfo | null;
+    /** 实时信息（0xD3，含义由 0xD2 定义） */
+    realtime?: LaserRealtimeItem[];
+}
+
+/** 激光器基本信息（0xD1） */
+export interface LaserBasicInfo {
+    project_no: string;
+    hw_version: string;
+    sw_version: string;
+    sn: string;
+    power_unit: string;
+    power_max: number;
+    power_set_mode: string;
+    product_class: string;
+    seed_temp_min: number;
+    seed_temp_max: number;
+}
+
+/** 激光器实时信息项 */
+export interface LaserRealtimeItem {
+    label: string;
+    value: string;
 }
 
 /** 电机实时状态（对应 Rust MotorState） */export interface MotorState {

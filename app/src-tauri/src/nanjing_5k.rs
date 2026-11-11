@@ -5,7 +5,7 @@
 //! 校验：前 8 字节累加，取低 8 位。
 //! 状态帧：AA 55 ... 共 50 字节，主控板地址 0x00。
 
-use crate::laser::{LaserStatus, OpenMode};
+use crate::nanjing_20k::{LaserStatus, OpenMode};
 
 /// 主控板地址
 pub const MAIN_ADDR: u8 = 0x00;

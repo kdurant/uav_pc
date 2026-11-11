@@ -18,7 +18,7 @@ pub const LASER_RESPONSE_TIMEOUT_MS: u64 = 1000;
 /// 使用本模块 AA55 协议的激光器类型。
 /// 其余类型由 `control.rs` 分派（nanjing_5k 走 5kHz 协议；nanjing_20k / keopsys_20k 协议待确认）。
 pub fn is_supported_type(laser_type: &str) -> bool {
-    matches!(laser_type, "connet_20k")
+    matches!(laser_type, "connet_20k" | "nanjing_20k")
 }
 
 /// 激光器工作模式
@@ -28,8 +28,40 @@ pub enum OpenMode {
     OutSide = 0x01,
 }
 
+/// 激光器基本信息（0xD1）
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct LaserBasicInfo {
+    /// 项目号
+    pub project_no: String,
+    /// 硬件版本
+    pub hw_version: String,
+    /// 软件版本
+    pub sw_version: String,
+    /// 设备 SN
+    pub sn: String,
+    /// 输出功率单位
+    pub power_unit: String,
+    /// 输出功率最大值
+    pub power_max: u32,
+    /// 功率设置方式
+    pub power_set_mode: String,
+    /// 产品类别
+    pub product_class: String,
+    /// 种子温度最小值（℃）
+    pub seed_temp_min: f64,
+    /// 种子温度最大值（℃）
+    pub seed_temp_max: f64,
+}
+
+/// 实时信息项（含义来自 0xD2）
+#[derive(Debug, Clone, Serialize)]
+pub struct LaserRealtimeItem {
+    pub label: String,
+    pub value: String,
+}
+
 /// 激光器实时状态（14 字节，小端）
-#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct LaserStatus {
     /// 开关状态：0x00 关闭，其它为开启
     pub status: u8,
@@ -78,6 +110,12 @@ pub struct LaserStatus {
     pub status_flags: Option<u32>,
     /// 原始错误标志位
     pub error_flags: Option<u32>,
+
+    // ===== Connet 20k 扩展信息 =====
+    /// 基本信息（0xD1）
+    pub basic: Option<LaserBasicInfo>,
+    /// 实时信息（0xD3，含义由 0xD2 定义）
+    pub realtime: Vec<LaserRealtimeItem>,
 }
 
 /// 打开激光器
@@ -118,6 +156,16 @@ pub fn build_set_current(current_ma: u32) -> Vec<u8> {
 /// 查询实时状态
 pub fn build_query_status() -> Vec<u8> {
     vec![0xAA, 0x55, 0xD3, 0x00, 0x00, 0x00]
+}
+
+/// 查询基本信息（0xD1）
+pub fn build_query_basic() -> Vec<u8> {
+    vec![0xAA, 0x55, 0xD1, 0x00, 0x00, 0x00]
+}
+
+/// 查询实时信息含义（0xD2）
+pub fn build_query_realtime_meanings() -> Vec<u8> {
+    vec![0xAA, 0x55, 0xD2, 0x00, 0x00, 0x00]
 }
 
 /// 应答固定前缀长度：`55 AA <cmd> <len>`。
@@ -181,6 +229,192 @@ pub fn parse_status(payload: &[u8]) -> Result<LaserStatus, String> {
     })
 }
 
+/// 解析 0xD2 应答中的实时信息含义列表
+pub fn parse_realtime_meanings(payload: &[u8]) -> Vec<u8> {
+    if payload.len() < 6 || payload[0] != 0x55 || payload[1] != 0xAA || payload[2] != 0xD2 {
+        return Vec::new();
+    }
+    // 长度在 payload[3]；数据区第一个字节为保留位，其后是含义列表
+    let n = payload[3] as usize;
+    if payload.len() < 4 + n {
+        return Vec::new();
+    }
+    payload[5..4 + n].to_vec()
+}
+
+fn temp_c(raw: u16) -> f64 {
+    raw as f64 / 100.0 - 273.15
+}
+
+fn realtime_label(code: u8) -> &'static str {
+    match code {
+        0x10 => "泵浦温度",
+        0x11 => "泵浦1温度",
+        0x12 => "泵浦2温度",
+        0x1D => "种子温度",
+        0x1F => "模块温度",
+        0x20 => "泵浦电流",
+        0x21 => "泵浦1电流",
+        0x22 => "泵浦2电流",
+        0x50 => "输出功率",
+        0x5E => "泵浦功率",
+        _ => "实时信息",
+    }
+}
+
+/// 解析 0xD3 应答，按 0xD2 的含义列表生成实时信息项
+pub fn parse_realtime_status(payload: &[u8], meanings: &[u8]) -> Result<LaserStatus, String> {
+    if payload.len() < 8 || payload[0] != 0x55 || payload[1] != 0xAA || payload[2] != 0xD3 {
+        return Err("激光器实时信息帧头错误".into());
+    }
+    let n = payload[3] as usize;
+    if n < 2 || payload.len() < 4 + n + 2 {
+        return Err(format!("激光器实时信息长度错误: {}", payload.len()));
+    }
+
+    let status = payload[4];
+    let alarm = payload[5];
+    let data = &payload[6..4 + n];
+
+    let mut out = LaserStatus {
+        status,
+        error_code: alarm,
+        ..Default::default()
+    };
+
+    for (i, chunk) in data.chunks_exact(2).enumerate() {
+        let raw = u16::from_le_bytes([chunk[0], chunk[1]]);
+        let code = meanings.get(i).copied().unwrap_or(0);
+        let label = realtime_label(code);
+        let value = if (0x10..=0x1F).contains(&code) {
+            if raw == 0 {
+                "—".to_string()
+            } else {
+                format!("{:.2} ℃", temp_c(raw))
+            }
+        } else if (0x20..=0x2F).contains(&code) {
+            format!("{raw} mA")
+        } else {
+            format!("{raw}")
+        };
+
+        // 兼容旧字段（箱体温度、泵浦温度、电流、功率）
+        match code {
+            0x10 | 0x1F if raw > 0 => out.box_temp = temp_c(raw) as f32,
+            0x11 if raw > 0 => out.pump1_temp = temp_c(raw) as f32,
+            0x12 if raw > 0 => out.pump2_temp = temp_c(raw) as f32,
+            0x20 | 0x21 => out.pump1_current = raw,
+            0x22 => out.pump2_current = raw,
+            0x50 => out.export_power = raw as u32,
+            _ => {}
+        }
+
+        out.realtime.push(LaserRealtimeItem {
+            label: label.to_string(),
+            value,
+        });
+    }
+
+    Ok(out)
+}
+
+/// 解析 0xD1 基本信息
+pub fn parse_basic_info(payload: &[u8]) -> Result<LaserBasicInfo, String> {
+    if payload.len() < 4 + 36 || payload[0] != 0x55 || payload[1] != 0xAA || payload[2] != 0xD1 {
+        return Err("激光器基本信息帧格式错误".into());
+    }
+    let d = &payload[4..4 + 36];
+
+    // 该固件的项目号/版本/SN 以数值字节表示，不是 ASCII
+    let project_no = format!("{}{}{}", d[0], d[1], d[2]);
+    let hw_version = format!("{}.{}", d[3], d[4]);
+    let sw_version = format!("{}.{}.{}", d[5], d[6], d[7]);
+    let sn: String = d[8..17].iter().map(|b| b.to_string()).collect();
+
+    let power_unit = match d[17] {
+        0 => "mW",
+        1 => "W",
+        2 => "uW",
+        _ => "未知",
+    };
+    let power_set_mode = match d[20] {
+        1 => "设置功率",
+        2 => "设置电流",
+        3 => "设置 DA",
+        4 => "电位器",
+        5 => "固定功率",
+        6 => "通过电压设置",
+        7 => "设置泵浦功率",
+        8 => "设置峰值功率",
+        9 => "设置增益",
+        10 => "设置监测端功率",
+        _ => "未知",
+    };
+    let product_class = match d[31] {
+        2 => "脉冲激光器（不带放大）",
+        3 => "脉冲激光器（带放大）",
+        _ => "未知",
+    };
+
+    Ok(LaserBasicInfo {
+        project_no,
+        hw_version,
+        sw_version,
+        sn,
+        power_unit: power_unit.to_string(),
+        power_max: u16::from_le_bytes([d[18], d[19]]) as u32,
+        power_set_mode: power_set_mode.to_string(),
+        product_class: product_class.to_string(),
+        seed_temp_min: temp_c(u16::from_le_bytes([d[32], d[33]])),
+        seed_temp_max: temp_c(u16::from_le_bytes([d[34], d[35]])),
+    })
+}
+
+fn checksum_u16(bytes: &[u8]) -> u16 {
+    bytes
+        .iter()
+        .fold(0u16, |acc, &b| acc.wrapping_add(b as u16))
+}
+
+/// 从连续字节流中取出完整的 Connet 应答帧（`55 AA <cmd> <len> data sum`）。
+///
+/// 返回 `(命令字, 完整帧字节)`；不完整的尾部保留，等待后续数据。
+pub fn take_frames(buf: &mut Vec<u8>) -> Vec<(u8, Vec<u8>)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+
+    while i + 6 <= buf.len() {
+        if buf[i] != 0x55 || buf[i + 1] != 0xAA {
+            i += 1;
+            continue;
+        }
+        let len = buf[i + 3] as usize;
+        let total = len + 6;
+        if i + total > buf.len() {
+            break;
+        }
+        let expected = checksum_u16(&buf[i + 4..i + 4 + len]);
+        let got = u16::from_le_bytes([buf[i + 4 + len], buf[i + 4 + len + 1]]);
+        if expected != got {
+            // 部分固件的校验范围与文档不一致；帧头/长度正确时仍按帧切分，
+            // 避免整条状态链路因校验差异而完全不可用。
+            log::warn!(
+                "Laser frame checksum mismatch: cmd=0x{:02X}, got=0x{:04X}, calc=0x{:04X}",
+                buf[i + 2],
+                got,
+                expected
+            );
+        }
+        out.push((buf[i + 2], buf[i..i + total].to_vec()));
+        i += total;
+    }
+
+    if i > 0 {
+        buf.drain(..i);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,8 +422,8 @@ mod tests {
     #[test]
     fn test_supported_laser_types() {
         assert!(is_supported_type("connet_20k"));
+        assert!(is_supported_type("nanjing_20k"));
         assert!(!is_supported_type("nanjing_5k"));
-        assert!(!is_supported_type("nanjing_20k"));
         assert!(!is_supported_type("keopsys_20k"));
         assert!(!is_supported_type(""));
         assert!(!is_supported_type("laser_connet"));

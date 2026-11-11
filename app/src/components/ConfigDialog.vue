@@ -25,7 +25,7 @@ const { reload: reloadCaptureConfig } = useCaptureConfig();
 /** 可选激光器类型（与后端 config.rs 校验、control.rs 协议分派保持一致） */
 const LASER_TYPES = [
     { value: "nanjing_5k", label: "南京中科神光 5kHz（nanjing_5k）" },
-    { value: "nanjing_20k", label: "南京中科神光 20kHz（nanjing_20k，协议待确认）" },
+    { value: "nanjing_20k", label: "南京中科神光 20kHz（nanjing_20k）" },
     { value: "connet_20k", label: "上海翰宇 20kHz（connet_20k）" },
     { value: "keopsys_20k", label: "进口 Keopsys 20kHz（keopsys_20k，协议待确认）" },
 ];

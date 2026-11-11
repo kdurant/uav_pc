@@ -1,7 +1,7 @@
 //! 激光器（0x0200）与电机（0x0f00）透传控制。
 
 use super::*;
-use crate::laser_5khz;
+use crate::nanjing_5k;
 
 // ========== 激光器 / 电机（0x0200 / 0x0f00 透传） ==========
 
@@ -21,7 +21,7 @@ pub async fn laser_command(
     value: Option<u32>,
 ) -> Result<Option<LaserStatus>, String> {
     // 根据 config.toml [radar].laser_type 选择激光器通信协议：
-    // - nanjing_5k：5kHz 主控板协议（laser_5khz）
+    // - nanjing_5k：5kHz 主控板协议（nanjing_5k）
     // - connet_20k：AA55 协议（laser）
     // - nanjing_20k / keopsys_20k：协议尚未确认，直接拒绝，避免用错协议操作激光器
     let laser_type = current_config(&app).radar.laser_type.trim().to_string();
@@ -29,9 +29,10 @@ pub async fn laser_command(
         return Err("未配置激光器类型（config.toml [radar].laser_type）".into());
     }
     match laser_type.as_str() {
-        "nanjing_5k" => return laser_5khz_command(app, device_ip, action, value).await,
-        "connet_20k" => {}
-        "nanjing_20k" | "keopsys_20k" => {
+        "nanjing_5k" => return nanjing_5k_command(app, device_ip, action, value).await,
+        // nanjing_20k 与 connet_20k 使用同一套 AA55 协议
+        "nanjing_20k" | "connet_20k" => {}
+        "keopsys_20k" => {
             return Err(format!(
                 "激光器 {} 的通信协议尚未确认，暂不支持控制",
                 laser_type
@@ -47,9 +48,9 @@ pub async fn laser_command(
     match action.as_str() {
         "open" | "close" => {
             let (payload, expect) = if action == "open" {
-                (laser::build_open(), laser::open_ack())
+                (nanjing_20k::build_open(), nanjing_20k::open_ack())
             } else {
-                (laser::build_close(), laser::open_ack())
+                (nanjing_20k::build_close(), nanjing_20k::open_ack())
             };
             let resp = request(
                 &app,
@@ -57,10 +58,10 @@ pub async fn laser_command(
                 target,
                 0x0200,
                 payload,
-                laser::LASER_RESPONSE_TIMEOUT_MS,
+                nanjing_20k::LASER_RESPONSE_TIMEOUT_MS,
             )
             .await?;
-            if !laser::matches_ack(&resp, expect) {
+            if !nanjing_20k::matches_ack(&resp, expect) {
                 return Err(format!("激光器{}失败，应答: {}", if action == "open" { "打开" } else { "关闭" }, hex_bytes(&resp)));
             }
             log::info!("Laser {} ok", action);
@@ -68,8 +69,8 @@ pub async fn laser_command(
         }
         "mode" => {
             let mode = match value {
-                Some(0) => laser::OpenMode::InSide,
-                Some(1) => laser::OpenMode::OutSide,
+                Some(0) => nanjing_20k::OpenMode::InSide,
+                Some(1) => nanjing_20k::OpenMode::OutSide,
                 _ => return Err("激光器模式取值必须为 0（内触发）或 1（外触发）".into()),
             };
             let resp = request(
@@ -77,11 +78,11 @@ pub async fn laser_command(
                 &network,
                 target,
                 0x0200,
-                laser::build_set_mode(mode),
-                laser::LASER_RESPONSE_TIMEOUT_MS,
+                nanjing_20k::build_set_mode(mode),
+                nanjing_20k::LASER_RESPONSE_TIMEOUT_MS,
             )
             .await?;
-            if !laser::matches_ack(&resp, laser::mode_ack()) {
+            if !nanjing_20k::matches_ack(&resp, nanjing_20k::mode_ack()) {
                 return Err(format!("激光器模式设置失败，应答: {}", hex_bytes(&resp)));
             }
             log::info!("Laser mode set to {:?}", mode);
@@ -92,23 +93,17 @@ pub async fn laser_command(
             if current > 8000 {
                 return Err("激光器电流超出范围（0~8000 mA）".into());
             }
-            let resp = request(
+            // 部分 Connet 20k 固件对 0xC3 不返回应答，等待会误报超时。
+            // 命令已通过串口透传发出，这里发送成功即视为完成。
+            send_frame(
                 &app,
                 &network,
                 target,
                 0x0200,
-                laser::build_set_current(current),
-                laser::LASER_RESPONSE_TIMEOUT_MS,
+                nanjing_20k::build_set_current(current),
             )
             .await?;
-            if !laser::matches_ack(&resp, laser::current_ack()) {
-                return Err(format!("激光器电流设置失败，应答: {}", hex_bytes(&resp)));
-            }
-            log::info!(
-                "Laser current set to {} mA (ack: {})",
-                current,
-                hex_bytes(&resp)
-            );
+            log::info!("Laser current set to {} mA", current);
             Ok(None)
         }
         "freq" => {
@@ -121,16 +116,98 @@ pub async fn laser_command(
             Ok(None)
         }
         "status" => {
-            let resp = request(
+            // 连续发送 D2/D3/D1，统一收集应答。
+            // 逐条 request 等待会因迟到应答错位导致解析失败、状态轮询中断。
+            let mut rx = subscribe_frames(&app).await;
+            send_frame(
                 &app,
                 &network,
                 target,
                 0x0200,
-                laser::build_query_status(),
-                laser::LASER_RESPONSE_TIMEOUT_MS,
+                nanjing_20k::build_query_realtime_meanings(),
             )
             .await?;
-            let status = laser::parse_status(&resp)?;
+            send_frame(
+                &app,
+                &network,
+                target,
+                0x0200,
+                nanjing_20k::build_query_status(),
+            )
+            .await?;
+            send_frame(
+                &app,
+                &network,
+                target,
+                0x0200,
+                nanjing_20k::build_query_basic(),
+            )
+            .await?;
+
+            let deadline = tokio::time::Instant::now()
+                + std::time::Duration::from_millis(nanjing_20k::LASER_RESPONSE_TIMEOUT_MS);
+            let mut buf: Vec<u8> = Vec::new();
+            let mut raw_recv: Vec<u8> = Vec::new();
+            let mut meanings: Vec<u8> = Vec::new();
+            let mut realtime: Option<LaserStatus> = None;
+            let mut basic: Option<nanjing_20k::LaserBasicInfo> = None;
+
+            loop {
+                for (cmd, frame) in nanjing_20k::take_frames(&mut buf) {
+                    match cmd {
+                        0xD2 => meanings = nanjing_20k::parse_realtime_meanings(&frame),
+                        0xD3 => match nanjing_20k::parse_realtime_status(&frame, &meanings) {
+                            Ok(status) => realtime = Some(status),
+                            Err(e) => log::warn!("Laser realtime parse failed: {e}"),
+                        },
+                        0xD1 => match nanjing_20k::parse_basic_info(&frame) {
+                            Ok(info) => basic = Some(info),
+                            Err(e) => log::warn!("Laser basic parse failed: {e}"),
+                        },
+                        _ => {}
+                    }
+                }
+
+                if realtime.is_some() && basic.is_some() {
+                    break;
+                }
+                let remaining =
+                    deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                // 拿到实时信息后只再给基本信息留一小段等待时间，避免拖慢轮询
+                let wait = if realtime.is_some() {
+                    remaining.min(std::time::Duration::from_millis(150))
+                } else {
+                    remaining
+                };
+
+                match tokio::time::timeout(wait, rx.recv()).await {
+                    Ok(Ok((frame, addr)))
+                        if frame.cmd == 0x0200 && addr.ip() == target.ip() =>
+                    {
+                        raw_recv.extend_from_slice(&frame.data);
+                        buf.extend_from_slice(&frame.data);
+                    }
+                    Ok(Ok(_)) => continue,
+                    Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+                    Ok(Err(_)) => break,
+                    Err(_) => {
+                        if realtime.is_some() {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            let mut status = realtime.ok_or_else(|| {
+                format!(
+                    "未收到激光器实时信息（0xD3），已收到: {}",
+                    hex_bytes(&raw_recv)
+                )
+            })?;
+            status.basic = basic;
             log::debug!("Laser status: {:?}", status);
             Ok(Some(status))
         }
@@ -141,7 +218,7 @@ pub async fn laser_command(
 /// 5kHz / 25uJ 激光器主控板控制。
 ///
 /// 命令帧和状态帧格式见 doc/laser/5khz/。
-async fn laser_5khz_command(
+async fn nanjing_5k_command(
     app: AppHandle,
     device_ip: String,
     action: String,
@@ -152,48 +229,48 @@ async fn laser_5khz_command(
     let network = get_or_init_network(&app).await?;
 
     let (frame, require_status) = match action.as_str() {
-        "open" => (laser_5khz::build_open(), false),
-        "close" => (laser_5khz::build_close(), false),
+        "open" => (nanjing_5k::build_open(), false),
+        "close" => (nanjing_5k::build_close(), false),
         "mode" => {
             let mode = value.ok_or("缺少激光器模式")?;
             if mode > 1 {
                 return Err("激光器模式取值必须为 0（内触发）或 1（外触发）".into());
             }
             let mode = if mode == 0 {
-                laser::OpenMode::InSide
+                nanjing_20k::OpenMode::InSide
             } else {
-                laser::OpenMode::OutSide
+                nanjing_20k::OpenMode::OutSide
             };
-            (laser_5khz::build_mode(mode), false)
+            (nanjing_5k::build_mode(mode), false)
         }
         "freq" => {
             let hz = value.ok_or("缺少重频值（Hz）")?;
             if !(1..=5000).contains(&hz) {
                 return Err("5kHz 激光器重频范围为 1~5000 Hz".into());
             }
-            (laser_5khz::build_freq(hz), false)
+            (nanjing_5k::build_freq(hz), false)
         }
         "current" => {
             let ma = value.ok_or("缺少电流值（mA）")?;
             if ma > 8000 {
                 return Err("5kHz 激光器电流范围为 0~8000 mA".into());
             }
-            (laser_5khz::build_current_ma(ma), false)
+            (nanjing_5k::build_current_ma(ma), false)
         }
         "pulse_width" => {
             let us = value.ok_or("缺少脉宽值（µs）")?;
             if !(50..=80).contains(&us) {
                 return Err("5kHz 激光器脉宽范围为 50~80 µs".into());
             }
-            (laser_5khz::build_pulse_width(us as u16), false)
+            (nanjing_5k::build_pulse_width(us as u16), false)
         }
-        "clear_error" => (laser_5khz::build_clear_error(), false),
-        "status" => (laser_5khz::build_query_status(), true),
+        "clear_error" => (nanjing_5k::build_clear_error(), false),
+        "status" => (nanjing_5k::build_query_status(), true),
         other => return Err(format!("未知的激光器操作: {}", other)),
     };
 
     if require_status {
-        return laser_5khz_query_status(&app, &network, target)
+        return nanjing_5k_query_status(&app, &network, target)
             .await
             .map(Some);
     }
@@ -212,7 +289,7 @@ async fn laser_5khz_command(
 /// 分段透传，主控帧不一定在第一段里。这里在超时周期内多次重发查询
 /// （每次重发都会把设备的 UDP 回包目标重新指回本机，抵消其它客户端抢占），
 /// 收集 0x00/0x99/0x3C/0x3D，合并成一份完整状态。
-async fn laser_5khz_query_status(
+async fn nanjing_5k_query_status(
     app: &AppHandle,
     network: &UdpNetwork,
     target: SocketAddr,
@@ -223,7 +300,7 @@ async fn laser_5khz_query_status(
     const SIBLING_GRACE_MS: u64 = 200;
 
     let mut rx = subscribe_frames(app).await;
-    let timeout = std::time::Duration::from_millis(laser::LASER_RESPONSE_TIMEOUT_MS);
+    let timeout = std::time::Duration::from_millis(nanjing_20k::LASER_RESPONSE_TIMEOUT_MS);
     let deadline = tokio::time::Instant::now() + timeout;
     let mut next_poll = tokio::time::Instant::now();
     let mut sibling_deadline: Option<tokio::time::Instant> = None;
@@ -235,18 +312,18 @@ async fn laser_5khz_query_status(
     let mut shg_temp: Option<LaserStatus> = None;
 
     loop {
-        for (addr, status) in laser_5khz::take_status_frames(&mut buf) {
+        for (addr, status) in nanjing_5k::take_status_frames(&mut buf) {
             match addr {
-                laser_5khz::MAIN_ADDR if main_status.is_none() => {
+                nanjing_5k::MAIN_ADDR if main_status.is_none() => {
                     main_status = Some(status);
                     sibling_deadline = Some(
                         tokio::time::Instant::now()
                             + std::time::Duration::from_millis(SIBLING_GRACE_MS),
                     );
                 }
-                laser_5khz::MAIN_ADDR_2 if aux_status.is_none() => aux_status = Some(status),
-                laser_5khz::TEMP_ADDR_LD if ld_temp.is_none() => ld_temp = Some(status),
-                laser_5khz::TEMP_ADDR_SHG if shg_temp.is_none() => shg_temp = Some(status),
+                nanjing_5k::MAIN_ADDR_2 if aux_status.is_none() => aux_status = Some(status),
+                nanjing_5k::TEMP_ADDR_LD if ld_temp.is_none() => ld_temp = Some(status),
+                nanjing_5k::TEMP_ADDR_SHG if shg_temp.is_none() => shg_temp = Some(status),
                 _ => {}
             }
         }
@@ -278,7 +355,7 @@ async fn laser_5khz_query_status(
                 network,
                 target,
                 0x0200,
-                laser_5khz::build_query_status(),
+                nanjing_5k::build_query_status(),
             )
             .await?;
             next_poll = now + std::time::Duration::from_millis(POLL_INTERVAL_MS);

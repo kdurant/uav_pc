@@ -40,9 +40,9 @@ onUnmounted(() => {
 });
 
 /** 已实现通信协议的激光器类型：nanjing_5k（5kHz 协议）、connet_20k（AA55 协议） */
-const SUPPORTED_LASER_TYPES = ["nanjing_5k", "connet_20k"];
+const SUPPORTED_LASER_TYPES = ["nanjing_5k", "nanjing_20k", "connet_20k"];
 /** 配置可选、但通信协议尚未确认的类型：只允许选择，禁用控制 */
-const PENDING_LASER_TYPES = ["nanjing_20k", "keopsys_20k"];
+const PENDING_LASER_TYPES = ["keopsys_20k"];
 
 const laserSupported = computed(() => SUPPORTED_LASER_TYPES.includes(laserType.value));
 const laserPendingProtocol = computed(() => PENDING_LASER_TYPES.includes(laserType.value));
@@ -73,6 +73,8 @@ const laserCurrent = ref(3000);
 const laserPulseWidth = ref(60);
 const laserStatus = ref<LaserStatus | null>(null);
 const laserBusy = ref(false);
+/** 最近一次激光器命令的错误信息，用于轮询停止时提示 */
+const lastLaserError = ref("");
 /** 最近一次开光/关光操作时间，用于抑制旧状态回写使能开关 */
 let lastLaserToggleAt = 0;
 
@@ -125,9 +127,11 @@ async function laserAction(action: string, value?: number, quiet = false): Promi
       }
       laserStatus.value = status;
     }
+    lastLaserError.value = "";
     return true;
   } catch (e) {
     console.error(`laser_command ${action} failed:`, e);
+    lastLaserError.value = String(e);
     if (!quiet) {
       toast.error(`${LASER_ACTION_LABELS[action] ?? action}失败`, String(e));
     }
@@ -233,7 +237,12 @@ async function pollLaserStatus() {
       pollFailures = 0;
     } else if (++pollFailures >= 3) {
       stopLaserPolling();
-      toast.warning("状态查询已停止", "连续 3 次未获取到激光器状态");
+      toast.warning(
+        "状态查询已停止",
+        lastLaserError.value
+          ? `连续 3 次未获取到激光器状态：${lastLaserError.value}`
+          : "连续 3 次未获取到激光器状态"
+      );
     }
   } finally {
     pollInFlight = false;
@@ -278,7 +287,28 @@ const tempAlarm = computed(() => {
   return null;
 });
 
-const laserStatusItems = computed(() => {
+interface LaserStatusItem {
+  label: string;
+  value: string;
+  /** 跨两列显示，用于较长文本 */
+  wide?: boolean;
+}
+
+/** Connet 20k 报警代码解析（0xD3 应答第 2 个数据字节） */
+function laserAlarmText(code: number): string {
+  if (code === 0) return "正常";
+  const parts: string[] = [];
+  if (code & 0x01) parts.push("模块温度异常");
+  if (code & 0x02) parts.push("种子激光器温度异常");
+  if (code & 0x04) parts.push("输入功率异常");
+  if (code & 0x08) parts.push("泵浦温度异常");
+  if (code & 0x10) parts.push("泵浦功率异常");
+  if (code & 0x20) parts.push("种子激光器功率异常");
+  if (code & 0x80) parts.push("保存数据出错");
+  return parts.length > 0 ? parts.join("、") : "未知";
+}
+
+const laserStatusItems = computed<LaserStatusItem[]>(() => {
   const s = laserStatus.value;
   const dash = "-";
 
@@ -324,24 +354,73 @@ const laserStatusItems = computed(() => {
       { label: "工作时间", value: s?.work_time_s != null ? `${s.work_time_s} s` : dash },
       {
         label: "错误码",
-        value: s ? `0x${s.error_code.toString(16).padStart(2, "0")}` : dash,
+        value: s
+          ? `0x${s.error_code.toString(16).padStart(2, "0")} · ${laserAlarmText(s.error_code)}`
+          : dash,
       },
     ];
   }
 
-  return [
+  const items: LaserStatusItem[] = [
     { label: "开关状态", value: s ? (s.status === 0 ? "关闭" : "开启") : dash },
     {
       label: "错误码",
-      value: s ? `0x${s.error_code.toString(16).padStart(2, "0")}` : dash,
+      value: s
+        ? `0x${s.error_code.toString(16).padStart(2, "0")} · ${laserAlarmText(s.error_code)}`
+        : dash,
     },
-    { label: "箱体温度", value: s ? `${s.box_temp.toFixed(1)} ℃` : dash },
-    { label: "泵浦1温度", value: s ? `${s.pump1_temp.toFixed(1)} ℃` : dash },
-    { label: "泵浦2温度", value: s ? `${s.pump2_temp.toFixed(1)} ℃` : dash },
-    { label: "泵浦1电流", value: s ? `${s.pump1_current} mA` : dash },
-    { label: "泵浦2电流", value: s ? `${s.pump2_current} mA` : dash },
-    { label: "输出功率", value: s ? `${(s.export_power / 1000).toFixed(2)} W` : dash },
   ];
+
+  // 设备基本信息（0xD1）
+  const basic = s?.basic;
+  if (basic) {
+    items.push(
+      // { label: "项目号", value: basic.project_no || dash },
+      // { label: "硬件版本", value: basic.hw_version || dash },
+      // { label: "软件版本", value: basic.sw_version || dash },
+      { label: "设备 SN", value: basic.sn || dash },
+      // { label: "功率设置方式", value: basic.power_set_mode || dash, wide: true },
+      // { label: "产品类别", value: basic.product_class || dash, wide: true },
+      {
+        label: "输出功率范围",
+        value: `${basic.power_max} ${basic.power_unit}`,
+        wide: true,
+      },
+      {
+        label: "种子温度范围",
+        value: `${basic.seed_temp_min.toFixed(2)} ~ ${basic.seed_temp_max.toFixed(2)} ℃`,
+        wide: true,
+      }
+    );
+  }
+
+  // 实时信息：按协议含义固定列出，未返回的项显示占位值
+  const REALTIME_LABELS = [
+    // "泵浦温度",
+    "泵浦1温度",
+    // "泵浦2温度",
+    "种子温度",
+    "模块温度",
+    // "泵浦电流",
+    "泵浦1电流",
+    "泵浦2电流",
+    // "输出功率",
+    // "泵浦功率",
+  ];
+  const realtimeMap = new Map(
+    (s?.realtime ?? []).map((entry) => [entry.label, entry.value])
+  );
+  for (const label of REALTIME_LABELS) {
+    items.push({ label, value: realtimeMap.get(label) ?? dash });
+  }
+  // 设备返回的额外含义项也一并显示
+  for (const entry of s?.realtime ?? []) {
+    if (!REALTIME_LABELS.includes(entry.label)) {
+      items.push({ label: entry.label, value: entry.value });
+    }
+  }
+
+  return items;
 });
 </script>
 
@@ -446,7 +525,12 @@ const laserStatusItems = computed(() => {
       <p v-if="tempAlarm" class="laser-warning">{{ tempAlarm }}</p>
 
       <div class="laser-status-table">
-        <div v-for="item in laserStatusItems" :key="item.label" class="laser-status-cell">
+        <div
+          v-for="(item, index) in laserStatusItems"
+          :key="item.label + '-' + index"
+          class="laser-status-cell"
+          :class="{ wide: item.wide }"
+        >
           <span class="laser-status-name">{{ item.label }}</span>
           <span class="laser-status-val">{{ item.value }}</span>
         </div>
@@ -457,10 +541,10 @@ const laserStatusItems = computed(() => {
 </template>
 
 <style scoped>
-/* 状态读数用两列网格排布，比逐行列表更紧凑 */
+/* 状态读数单列排布，每项一行 */
 .laser-status-table {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 1px;
   margin-top: 4px;
   background: var(--border-color);
@@ -480,10 +564,6 @@ const laserStatusItems = computed(() => {
 }
 
 /* 奇数项时最后一个单元格占满整行，避免右侧留空 */
-.laser-status-cell:nth-child(odd):last-child {
-  grid-column: span 2;
-}
-
 .laser-status-name {
   font-size: 11.5px;
   color: var(--text-tertiary);
@@ -499,15 +579,5 @@ const laserStatusItems = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-@media (max-width: 520px) {
-  .laser-status-table {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .laser-status-cell:nth-child(odd):last-child {
-    grid-column: auto;
-  }
 }
 </style>

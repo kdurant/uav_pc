@@ -730,7 +730,8 @@ function statusLabel(v: number | undefined): { text: string; cls: string } {
 }
 
 /* 指标磁贴 */
-.metric-grid {  display: grid;
+.metric-grid {
+  display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-bottom: 6px;
